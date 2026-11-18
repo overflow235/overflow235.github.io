@@ -10,7 +10,7 @@ window.SYR_CONFIG = {
   // 드라이브에 만들 자료 폴더 이름 (바꾸지 않아도 됩니다)
   folderName: "교회사역 플랫폼 DB",
   // 가입 신청서 (구글 설문) 주소와, 응답이 쌓이는 구글 시트 ID
-  joinFormUrl: "https://forms.gle/여기에_설문주소",
+  joinFormUrl: "https://forms.gle/r4ku8KZonfjkjU9CA",
   joinSheetId: "여기에_시트ID",
   ai: {
     // 승인된 모든 사람이 목사님 AI를 쓰게 하려면: ai-relay.gs 를 배포한 웹 앱 주소를 넣습니다 (README 5번)
