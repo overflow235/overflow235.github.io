@@ -417,6 +417,10 @@ a[href^="http"],code{overflow-wrap:anywhere}
 .bnav button.on::after{display:none}
 .bnav .cnt{position:absolute;top:3px;left:calc(50% + 8px);right:auto}
 }
+
+.subedit{all:unset;cursor:pointer;font-size:13px;padding:0 4px;opacity:.55;vertical-align:1px}.subedit:hover,.subedit:focus-visible{opacity:1}
+.ncatt{display:flex;align-items:center;gap:3px;margin:6px 0 2px}.ncatt i{font-style:normal;width:20px;height:20px;border-radius:6px;display:grid;place-items:center;font-size:11px;background:var(--line);color:var(--mute)}.ncatt i.on{background:var(--good-soft,#dcfce7);color:var(--good,#15803d);font-weight:700}.ncatt b{margin-left:6px;font-size:12.5px}
+.tile.hot b{color:var(--accent)}
 </style>
 </head>
 <body>
@@ -1795,7 +1799,7 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
 try{DB=JSON.parse(localStorage.getItem(KEY))}catch(e){}
 if(MODE==='start'){if(!DB||!DB.start){DB=startDB();try{localStorage.setItem(KEY,JSON.stringify(DB))}catch(e){}}if(PRESET_AUTO&&DB.orgYear===2026)DB.orgYear=2027}else if(!DB||!DB.U||!DB.EVENTS||!DB.fixReqs||!DB.U.g1||!DB.GUD||!DB.DLIB||!DB.U.a1||!DB.U.w1||!DB.AREAS)DB=seed();
 if(MODE!=='start')DB.set.appOwner=DB.set.appOwner||{차량:'a2',시설물:'a2',장소:'a1',트러스:'a1'};
-const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(DB))}catch(e){toast('저장 공간이 가득 찼습니다')}try{drvQueue()}catch(e){}try{if(CLOUD)clQueue()}catch(e){}};
+const save=()=>{try{ncpSync()}catch(e){}try{localStorage.setItem(KEY,JSON.stringify(DB))}catch(e){toast('저장 공간이 가득 찼습니다')}try{drvQueue()}catch(e){}try{if(CLOUD)clQueue()}catch(e){}};
 const S={role:'',uid:'',view:'',mid:null,mtab:'over',lib:'search',adm:'apply',q:'',kind:'전체',chat:{assist:[],admin:[]},busy:false,guq:'',draftApp:null,draftPlan:null};
 
 /* ================= 조회 도우미 ================= */
@@ -1854,7 +1858,24 @@ const curGU=()=>ensureUnit(unitOf(DB.U[S.uid]));
 const myV=()=>{const g=curGU();return g?DB.V.filter(v=>(v.gu||'13교구')===g.name):[]};
 const mySums=()=>{const g=curGU();return g?DB.SUMS.filter(x=>(x.gu||'13교구')===g.name):[]};
 const myRoll=()=>{const g=curGU();return g?DB.ROLL.filter(x=>(x.gu||'13교구')===g.name):[]};
-const myNC=()=>{const g=curGU();return g?DB.NC.filter(n=>n.gu===g.name):[]};
+const myNC=()=>{const g=curGU();if(!g)return [];const loc=DB.NC.filter(n=>n.gu===g.name);const ids=new Set(loc.map(n=>n.id));return loc.concat((DB.NCP||[]).filter(p=>p.gu===g.name&&!ids.has(p.id)).map(pncObj))};
+/* 새가족팀 기기의 기록 중 교역자에게 필요한 것만 공유 (연락처 · 연락 내용 · 등록 경로는 공유하지 않음) */
+function ncpSync(){if(!CLOUD||!Array.isArray(DB.NC))return;const me=CL.uid||S.uid||'';const mine=new Set(DB.NC.map(n=>n.id));const keep=(DB.NCP||[]).filter(p=>!mine.has(p.id)&&!(p.src&&p.src===me));
+  const now=DB.NC.map(n=>({id:n.id,src:me,name:n.name,gu:n.gu,reg:n.reg,carer:n.carer||null,cn:n.carer?nm(n.carer):'',status:n.status,attend:(n.attend||[]).map(x=>x?1:0),attD:(n.attD||[]).slice(0,6),share:n.share||'',last:(n.contacts&&n.contacts.length?lastC(n).date:'')}));
+  const next=keep.concat(now);if(JSON.stringify(next)!==JSON.stringify(DB.NCP||[]))DB.NCP=next}
+const pncObj=p=>Object.assign({},p,{shared:true,contacts:[],phone:'',route:'',attend:(p.attend||[]).slice()});
+const pncGet=id=>{const n=ncOf(id);if(n)return n;const p=(DB.NCP||[]).find(x=>x.id===id);return p?pncObj(p):null};
+const ncg=id=>{DB.NCG=DB.NCG||{};return DB.NCG[id]=DB.NCG[id]||{}};
+const NCDAY=()=>Number.isInteger(DB.set.ncDay)?DB.set.ncDay:0;
+function ncNext(){const d=new Date(TODAY+'T00:00:00');return add(TODAY,(NCDAY()-d.getDay()+7)%7)}
+function ncProg(n){const a=(n.attend||[]).map(Boolean);const done=a.filter(Boolean).length;const left=a.map((x,i)=>x?0:i+1).filter(Boolean);const wk=weekOf(n);const behind=n.status==='교육 중'?Math.max(0,(wk-1)-done):0;
+  const lastAtt=(n.attD||[]).filter(Boolean).sort().at(-1)||'';const gap=diff(TODAY,lastAtt||n.reg);const eta=done>=6?'':add(ncNext(),(6-done-1)*7);
+  const last=n.shared?n.last:((n.contacts&&n.contacts.length)?lastC(n).date:'');const G=(DB.NCG||{})[n.id]||{};const pv=n.pvisit||G.pv;
+  const F=[];if(n.status==='배정 대기'||!n.carer)F.push('돌봄목자 배정 전');
+  if(n.status==='교육 중'){if(behind>=2)F.push(`교육이 ${behind}주 밀림`);else if(behind===1)F.push('지난주 결석');if(gap>=14&&done<6&&(lastAtt||done===0))F.push(`${gap}일째 교육에 오지 않음`);if(n.carer&&(!last||diff(TODAY,last)>=7))F.push('돌봄 연락 1주 넘음');if(done>=6)F.push('6과 모두 출석 · 수료 처리 대기')}
+  if(n.status==='수료'&&!G.group)F.push('사랑방 연결 필요');if(n.status==='교구 인계'&&!pv)F.push('첫 심방 필요');if(n.status==='교구 인계'&&!G.group)F.push('사랑방 연결 필요');
+  return {done,left,behind,gap,eta,last,pv,G,F}}
+const SR_ST=['연결 예정','첫 모임 참석','정착'];
 const ZT=g=>g?UT[UTYPE(g)].zone:'마을';
 function leadOfM(m,id){id=id||S.uid;if(!m)return false;if(m.lead===id)return true;const t=teamOf(m.team);return !!t&&(t.lead===id||t.lead2===id)}
 const myTeams=id=>DB.TEAMS.filter(t=>(t.lead===id||t.lead2===id)||t.sup===id||t.members.includes(id));
@@ -1895,12 +1916,25 @@ function vPastorHome(){
   <div class="card"><h2>팀장 · 총괄로 맡은 사역</h2>${(()=>{const ms=DB.M.filter(m=>active(m)&&(leadOfM(m)||teamOf(m.team)?.sup===S.uid));return ms.length?`<div class="list">${ms.map(m=>{const my=DB.T.filter(t=>t.mid===m.id&&t.who===S.uid&&t.status!=='완료').length;const r=leadOfM(m)?'팀장':teamOf(m.team)?.sup===S.uid?'총괄':roleOf(m,S.uid,m.members.indexOf(S.uid));return `<button class="row" data-act="openM:${m.id}"><span style="flex:1"><span class="rt">${esc(m.name)}</span><br><span class="rm">${m.team} · ${esc(r)}${my?` · 내 일 ${my}건`:''}</span></span>${stChip(m)}</button>`}).join('')}</div>`:'<p class="note" style="margin:0">팀장 · 총괄로 맡은 사역이 없습니다.</p>'})()}<p class="note">팀장 · 총괄로 맡은 팀은 아래 버튼으로 그 화면에 들어갑니다.</p>${tm.some(t=>(t.lead===S.uid||t.lead2===S.uid)||t.sup===S.uid)?`<div class="bar">${tm.filter(t=>(t.lead===S.uid||t.lead2===S.uid)||t.sup===S.uid).map(t=>{const [k,l]=rl(t);return `<button class="btn sm" data-act="asRole:${k}">${l} 화면 · ${t.name}</button>`}).join('')}</div>`:''}</div></div></div>`}
 function vPastorNC(){if(S.glock)return lockHTML();
   const g=curGU();if(!g)return noUnit();const l=myNC();const by=st=>l.filter(n=>n.status===st);
-  const pr=n=>ncRow(n).replace('data-act="nc:','data-act="pnc:');
-  return `<h1>${g.name} 새가족 ${l.length}명</h1><p class="sub">새가족팀과 돌봄목자가 6주 동안 돌보고, 수료하면 ${g.kind}로 인계됩니다. 교역자는 진행을 보고, 인계받은 분의 첫 심방을 잡습니다.</p>
-  <div class="grid"><div class="card"><h2>교육 중 · 수료</h2><div class="list">${[...by('배정 대기'),...by('교육 중'),...by('수료')].map(pr).join('')||'<p class="empty">교육 중인 새가족이 없습니다.</p>'}</div></div>
-  <div class="card"><h2>인계받은 새가족</h2><div class="list">${by('교구 인계').map(n=>{const pv=n.pvisit&&DB.V.find(v=>v.id===n.pvisit);return `<div class="row"><span style="flex:1"><span class="rt">${esc(n.name)} 성도</span><br><span class="rm">${fmt(n.reg)} 등록 · 돌봄목자 ${nm(n.carer)||'-'}${pv?' · 첫 심방 '+fmt(pv.date):''}</span></span>${pv?'<span class="chip g">심방 잡음</span>':`<button class="btn sm pri" data-act="ncVisit:${n.id}">첫 심방 잡기</button>`}<button class="btn sm" data-act="pnc:${n.id}">기록</button></div>`}).join('')||'<p class="empty">인계받은 새가족이 없습니다.</p>'}</div></div></div>`}
-function pncModal(id){const n=ncOf(id);if(!n)return;
-  modal(`<div class="bar"><h2 style="flex:1;margin:0">${esc(n.name)} 성도</h2><button class="btn sm" data-act="close">닫기</button></div><p class="rm">${n.gu} · ${fmt(n.reg)} 등록 · ${esc(n.route)} · 돌봄목자 ${n.carer?nm(n.carer):'배정 전'} · 연락처 ${esc(n.phone)}</p><p class="note" style="margin:12px 0 6px">새가족 교육 출석 (새가족팀이 기록)</p><div class="bar">${n.attend.map((a,k)=>`<span class="chip ${a?'g':'q'}">${k+1}과 ${a?'출석':'-'}</span>`).join('')}</div><p class="note" style="margin:16px 0 4px">돌봄 연락 기록</p><div class="list">${n.contacts.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(c=>`<div class="row"><span class="when">${fmt(c.date)}</span><span class="chip">${c.type}</span><span style="flex:1">${esc(c.note)}</span></div>`).join('')||'<p class="note">아직 없습니다.</p>'}</div>${n.status==='교구 인계'&&!n.pvisit?`<button class="btn pri" style="margin-top:14px" data-act="ncVisit:${n.id}">첫 심방 잡기</button>`:''}`)}
+  const edu=[...by('배정 대기'),...by('교육 중')],fin=[...by('수료'),...by('교구 인계')];
+  const P=new Map(l.map(n=>[n.id,ncProg(n)]));const soon=edu.filter(n=>{const p=P.get(n.id);return p.done>=6||(p.eta&&diff(p.eta,TODAY)<=21)}).length;
+  const needSr=fin.filter(n=>!P.get(n.id).G.group).length,needV=by('교구 인계').filter(n=>!P.get(n.id).pv).length;
+  const chips=p=>p.F.map(f=>`<span class="chip a">${esc(f)}</span>`).join('');
+  const eduRow=n=>{const p=P.get(n.id);return `<button class="row" data-act="pnc:${n.id}" style="align-items:flex-start;text-align:left"><span class="ico">${esc(n.name.slice(0,1))}</span><span style="flex:1;min-width:0"><span class="rt">${esc(n.name)} 성도</span> <span class="rm">${fmt(n.reg)} 등록 · 돌봄목자 ${esc(n.cn||nm(n.carer)||'배정 전')}</span><span class="ncatt">${(n.attend||[]).map((a,k)=>`<i class="${a?'on':''}" title="${k+1}과">${k+1}</i>`).join('')}<b>${p.done}/6</b></span><span class="rm">${p.done>=6?'6과 모두 출석':`남은 과 ${p.left.map(x=>x+'과').join(' · ')} · 예상 수료 ${fmt(p.eta)}`}</span>${p.F.length||n.share?`<span class="bar" style="margin-top:4px;flex-wrap:wrap;gap:4px">${chips(p)}${n.share?'<span class="chip">전할 말 있음</span>':''}</span>`:''}</span></button>`};
+  const finRow=n=>{const p=P.get(n.id);const gr=p.G.group;return `<div class="row" style="align-items:flex-start;flex-wrap:wrap;gap:6px 10px"><span style="flex:1 1 200px;min-width:0"><span class="rt">${esc(n.name)} 성도</span> <span class="chip ${n.status==='교구 인계'?'g':''}">${n.status==='교구 인계'?'인계받음':'수료'}</span><br><span class="rm">${fmt(n.reg)} 등록 · 돌봄목자 ${esc(n.cn||nm(n.carer)||'-')}${p.pv?' · 첫 심방 '+fmt(p.G.pvDate||''):''}</span><br><span class="rm">사랑방: ${gr?`<b>${esc(gr.name)}</b>${gr.leader?' · '+esc(gr.leader):''} · ${esc(gr.state)}${gr.date?' · '+fmt(gr.date):''}`:'아직 연결 전'}</span></span><span class="bar" style="flex:none;gap:6px;flex-wrap:wrap">${n.status==='교구 인계'&&!p.pv?`<button class="btn sm pri" data-act="ncVisit:${n.id}">첫 심방 잡기</button>`:''}<button class="btn sm ${gr?'':'pri'}" data-act="pnc:${n.id}">${gr?'사랑방 · 기록':'사랑방 연결'}</button></span></div>`};
+  return `<h1>${g.name} 새가족 ${l.length}명</h1><p class="sub">새가족팀과 돌봄목자가 6주 동안 돌보고, 수료하면 ${g.kind}로 인계됩니다. 교역자는 교육 진행과 수료 시기를 보고, 인계받은 분의 첫 심방과 사랑방 연결까지 챙깁니다.</p>
+  <div class="tiles"><div class="tile"><b>${edu.length}명</b><span class="rm">교육 중</span></div><div class="tile"><b>${soon}명</b><span class="rm">3주 안 수료 예정</span></div><div class="tile ${needSr?'hot':''}"><b>${needSr}명</b><span class="rm">사랑방 연결 대기</span></div><div class="tile ${needV?'hot':''}"><b>${needV}명</b><span class="rm">첫 심방 필요</span></div></div>
+  <div class="grid"><div class="card"><h2>교육 진행</h2><p class="note" style="margin-top:-6px">새가족팀이 기록한 출석입니다. 연속으로 받지 않아도 되며, 남은 과를 마치면 수료합니다. 예상 수료는 다음 교육일부터 남은 과 수로 셉니다.</p><div class="list">${edu.map(eduRow).join('')||'<p class="empty">교육 중인 새가족이 없습니다.</p>'}</div></div>
+  <div class="card"><h2>수료 · 사랑방 연결</h2><div class="list">${fin.map(finRow).join('')||'<p class="empty">수료하거나 인계받은 새가족이 없습니다.</p>'}</div></div></div>
+  <p class="note">🔒 교역자 화면에는 출석 · 진행 · 돌봄목자 · 새가족팀이 남긴 "전할 말"만 보입니다. 연락처와 돌봄 연락 내용은 새가족팀 · 돌봄목자 기기에만 있습니다.</p>`}
+function pncModal(id){const n=pncGet(id);if(!n)return;const p=ncProg(n);const gr=p.G.group||{};const g=curGU();
+  modal(`<div class="bar"><h2 style="flex:1;margin:0">${esc(n.name)} 성도</h2><button class="btn sm" data-act="close">닫기</button></div><p class="rm">${esc(n.gu)} · ${fmt(n.reg)} 등록 · 돌봄목자 ${esc(n.cn||nm(n.carer)||'배정 전')} · ${esc(n.status)}${p.last?' · 마지막 돌봄 연락 '+fmt(p.last):''}</p>
+  <h3 style="margin:14px 0 6px">교육 출석 <span class="rm">(새가족팀 기록)</span></h3><div class="bar" style="flex-wrap:wrap;gap:6px">${(n.attend||[]).map((a,k)=>`<span class="chip ${a?'g':'q'}">${k+1}과 ${a?((n.attD||[])[k]?fmt(n.attD[k]):'출석'):'남음'}</span>`).join('')}</div>
+  <p style="margin:8px 0 0">${p.done>=6?'<b>6과를 모두 마쳤습니다.</b>':`<b>${p.done}/6 출석</b> · 남은 과 ${p.left.map(x=>x+'과').join(' · ')} · 예상 수료 <b>${fmt(p.eta)}</b>`}</p>
+  ${p.F.length||n.share?`<h3 style="margin:14px 0 6px">챙길 점</h3><div class="bar" style="flex-wrap:wrap;gap:6px">${p.F.map(f=>`<span class="chip a">${esc(f)}</span>`).join('')}</div>${n.share?`<div class="tip" style="margin-top:8px"><b>새가족팀이 전한 말</b><br>${esc(n.share)}</div>`:''}`:''}
+  <h3 style="margin:16px 0 6px">사랑방 연결</h3><form id="f-ncsr" data-id="${n.id}"><div class="two"><div class="field"><label for="sr_n">사랑방</label><input id="sr_n" list="sr_l" value="${esc(gr.name||'')}" placeholder="예: 3마을 김사랑 사랑방"><datalist id="sr_l">${(g?.zones||[]).map(z=>`<option value="${esc(z.name)}">`).join('')}</datalist></div><div class="field"><label for="sr_d">사랑목자</label><input id="sr_d" value="${esc(gr.leader||'')}" placeholder="이름"></div></div><div class="two"><div class="field"><label for="sr_s">상태</label><select id="sr_s">${SR_ST.map(x=>`<option ${gr.state===x?'selected':''}>${x}</option>`).join('')}</select></div><div class="field"><label for="sr_t">날짜</label><input id="sr_t" type="date" value="${esc(gr.date||TODAY)}"></div></div><div class="bar"><button class="btn pri">사랑방 저장</button>${gr.name?'<button type="button" class="btn sm" data-act="srDel:'+n.id+'">연결 지우기</button>':''}</div></form>
+  ${n.status==='교구 인계'&&!p.pv?`<button class="btn" style="margin-top:12px" data-act="ncVisit:${n.id}">첫 심방 잡기</button>`:''}
+  ${!n.shared&&n.contacts.length?`<h3 style="margin:16px 0 6px">돌봄 연락 기록</h3><div class="list">${n.contacts.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(c=>`<div class="row"><span class="when">${fmt(c.date)}</span><span class="chip">${c.type}</span><span style="flex:1">${esc(c.note)}</span></div>`).join('')}</div>`:''}`)}
 const bar=p=>`<span class="mini"><i style="width:${p}%"></i></span>`;
 function phaseLabel(off){if(off<-7)return `D-${Math.round(-off/7)}주`;if(off<0)return `D${off}`;if(off===0)return '사역 기간';return `D+${Math.round(off/7)}주`}
 
@@ -1965,6 +1999,9 @@ function render(){
     nfteam:{nc:vNC,edu:vEdu},
     carer:{home:vCarer,msg:vCarerMsg}}[S.role];h=(V[S.view]||Object.values(V)[0])()}
   if(MODE==='start'&&DB.turn&&!(S.setup&&!S.role)&&(!S.role||['admin','hm'].includes(S.role)))h=(S.role?turnBanner():`<div class="turnwrap">${turnBanner()}</div>`)+h;
+  if(S.role){const tk=S.role+'|'+S.view;const ov=(DB.TXT||{})[tk];const re=/<p class="sub">([\s\S]*?)<\/p>/;const mm=h.match(re);
+    if(mm){(S.subCur=S.subCur||{})[tk]=mm[1].replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').trim();const body=ov!=null?esc(ov):mm[1];
+      h=h.replace(re,`<p class="sub">${body}${(CLOUD?CL.owner:S.role==='admin')?` <button type="button" class="subedit" data-act="subEdit:${tk}" aria-label="이 설명 고치기" title="설명 고치기">✏️</button>`:''}</p>`)}}
   if(S.role)h=aHelp()+h;
   document.getElementById('view').innerHTML=h;try{document.title=PLAT();const am=document.querySelector('meta[name=apple-mobile-web-app-title]');if(am)am.content=CHN()||'교회사역 플랫폼';if(CFG().church)localStorage.setItem(KEY+'-church',CFG().church)}catch(e){}
   const ft=document.getElementById('foot');if(ft){const atHome=!S.role||S.view===HOME[S.role];
@@ -2901,7 +2938,7 @@ function vEdu(){
   return `<h1>교육 출석</h1><p class="sub">6주 새가족 교육 출석입니다. 칸을 눌러 출석을 바꾸고, 6과를 다 마치면 수료 처리합니다.</p><div class="card"><div class="scroll"><table class="t"><thead><tr><th>이름</th>${[1,2,3,4,5,6].map(k=>`<th class="n">${k}과</th>`).join('')}<th></th></tr></thead><tbody>${l.map(n=>`<tr><td>${esc(n.name)}<br><span class="rm">${n.gu} · ${n.status}</span></td>${n.attend.map((a,k)=>`<td class="n"><button class="chip ${a?'g':'q'}" data-act="att:${n.id}:${k}" aria-label="${k+1}과">${a?'출석':'-'}</button></td>`).join('')}<td class="n">${n.status==='교육 중'&&n.attend.every(Boolean)?`<button class="btn sm pri" data-act="graduate:${n.id}">수료</button>`:n.status==='수료'?`<button class="btn sm" data-act="nc:${n.id}">인계</button>`:''}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
 function ncSummary(n){const cnt=t=>n.contacts.filter(c=>c.type===t).length;const l=lastC(n);return `${n.name} 성도 · ${n.gu} · ${fmtY(n.reg)} 등록\n새가족 교육 ${n.attend.filter(Boolean).length}/6 출석\n연락 ${n.contacts.length}회 (전화 ${cnt('전화')} · 문자 ${cnt('문자')} · 만남 ${cnt('만남')} · 안내 ${cnt('안내')})\n마지막 연락: ${l?fmtY(l.date)+' '+l.note:'없음'}\n돌봄목자: ${nm(n.carer)||'-'}`}
-function ncModal(id){const n=ncOf(id);if(!n)return;modal(`<div class="bar"><h2 style="flex:1;margin:0">${esc(n.name)} 성도</h2><button class="btn sm" data-act="close">닫기</button></div><p class="rm">${n.gu} · ${fmt(n.reg)} 등록 · ${esc(n.route)} · ${n.carer?nm(n.carer):'목자 배정 전'} · 연락처 ${esc(n.phone)}</p><p class="note" style="margin:12px 0 6px">새가족 교육 출석</p><div class="bar">${n.attend.map((a,k)=>`<button class="chip ${a?'g':'q'}" data-act="att:${n.id}:${k}">${k+1}과 ${a?'출석':'-'}</button>`).join('')}</div><p class="note" style="margin:16px 0 4px">연락 기록</p><div class="list">${n.contacts.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(c=>`<div class="row"><span class="when">${fmt(c.date)}</span><span class="chip">${c.type}</span><span style="flex:1">${esc(c.note)}</span></div>`).join('')||'<p class="note">아직 없습니다.</p>'}</div>${n.status==='교육 중'&&n.attend.every(Boolean)?`<button class="btn pri" style="margin-top:12px" data-act="graduate:${n.id}">수료 처리</button>`:''}${n.status==='수료'?`<p class="note" style="margin:16px 0 4px">6주 기록 요약 · 교구 담당 교역자에게 전달</p><div class="body">${esc(ncSummary(n))}</div><button class="btn pri" data-act="handoff:${n.id}">${n.gu} 담당 교역자에게 인계</button>`:''}`)}
+function ncModal(id){const n=ncOf(id);if(!n)return;modal(`<div class="bar"><h2 style="flex:1;margin:0">${esc(n.name)} 성도</h2><button class="btn sm" data-act="close">닫기</button></div><p class="rm">${n.gu} · ${fmt(n.reg)} 등록 · ${esc(n.route)} · ${n.carer?nm(n.carer):'목자 배정 전'} · 연락처 ${esc(n.phone)}</p><p class="note" style="margin:12px 0 6px">새가족 교육 출석</p><div class="bar">${n.attend.map((a,k)=>`<button class="chip ${a?'g':'q'}" data-act="att:${n.id}:${k}">${k+1}과 ${a?'출석':'-'}</button>`).join('')}</div><p class="note" style="margin:16px 0 4px">교역자에게 전할 말 <span class="rm">(선택 · 담당 교역자 화면에 보입니다. 기도 제목 · 상담 내용은 적지 않습니다)</span></p><form id="f-ncshare" data-id="${n.id}" class="bar" style="flex-wrap:nowrap;gap:8px"><input id="ncs" value="${esc(n.share||'')}" placeholder="예: 평일 저녁만 연락 가능, 자녀 2명 함께 등록" style="flex:1"><button class="btn sm">저장</button></form>${(()=>{const G=(DB.NCG||{})[n.id]||{};return G.group?`<p class="rm" style="margin:8px 0 0">사랑방: <b>${esc(G.group.name)}</b>${G.group.leader?' · '+esc(G.group.leader):''} · ${esc(G.group.state)} (교역자 기록)</p>`:''})()}<p class="note" style="margin:16px 0 4px">연락 기록</p><div class="list">${n.contacts.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(c=>`<div class="row"><span class="when">${fmt(c.date)}</span><span class="chip">${c.type}</span><span style="flex:1">${esc(c.note)}</span></div>`).join('')||'<p class="note">아직 없습니다.</p>'}</div>${n.status==='교육 중'&&n.attend.every(Boolean)?`<button class="btn pri" style="margin-top:12px" data-act="graduate:${n.id}">수료 처리</button>`:''}${n.status==='수료'?`<p class="note" style="margin:16px 0 4px">6주 기록 요약 · 교구 담당 교역자에게 전달</p><div class="body">${esc(ncSummary(n))}</div><button class="btn pri" data-act="handoff:${n.id}">${n.gu} 담당 교역자에게 인계</button>`:''}`)}
 
 /* ================= 돌봄목자 ================= */
 function vCarer(){
@@ -3095,7 +3132,7 @@ document.addEventListener('click',e=>{
   if(a==='dlView'){dlViewModal(x1,Number(x2));return}
   if(a==='dlUp'){dlUpModal();return}
   if(a==='asRole'){enter(arg,S.uid);return}
-  if(a==='ncVisit'){const n=ncOf(arg);const g=curGU();const v={id:uid('v'),gu:g.name,date:add(TODAY,3),family:n.name+' 성도 가정',zone:g.zones[0].name,type:'새가족 심방',memo:'',follow:'',done:false,planned:true};DB.V.push(v);n.pvisit=v.id;save();render();visitModal(v.id);toast('첫 심방을 예정으로 잡았습니다. 날짜와 마을을 확인해 주세요');return}
+  if(a==='ncVisit'){const n=pncGet(arg);if(!n)return;const g=curGU();const v={id:uid('v'),gu:g.name,date:add(TODAY,3),family:n.name+' 성도 가정',zone:g.zones[0].name,type:'새가족 심방',memo:'',follow:'',done:false,planned:true};DB.V.push(v);if(!n.shared)n.pvisit=v.id;Object.assign(ncg(n.id),{pv:v.id,pvDate:v.date});save();render();visitModal(v.id);toast('첫 심방을 예정으로 잡았습니다. 날짜와 마을을 확인해 주세요');return}
   if(a==='newMin'){newMinModal();return}
   if(a==='logosAsk'){Adapter.notify(nm('p1'),`${nm(S.uid)} 로고스 이용권 요청`);toast('최종 관리자에게 이용권을 요청했습니다');return}
   if(a==='planRead'){const m=minOf(arg);m.read=m.read||{};if(m.members.includes(S.uid)&&!m.read[S.uid]){m.read[S.uid]=TODAY;if(m.ack)m.ack[S.uid]=true;save()}const my=DB.T.filter(x=>x.mid===m.id&&x.who===S.uid).sort((a,b)=>dueOf(a).localeCompare(dueOf(b)));modal(`<div class="bar"><h2 style="flex:1;margin:0">${esc(m.name)} · 기획안</h2><button class="btn sm" data-act="close">닫기</button></div><p class="note">${esc(m.team)} · 팀장 ${esc(nm(m.lead))} · 내 역할 ${esc(roleOf(m,S.uid,m.members.indexOf(S.uid)))}</p>${planView(m)}${my.length?`<h3>내 업무</h3><div class="list">${my.map(x=>`<div class="row"><span style="flex:1">${esc(x.title)}</span><span class="rm">${fmt(dueOf(x))}</span></div>`).join('')}</div>`:''}`);render();return}
@@ -3226,6 +3263,9 @@ document.addEventListener('click',e=>{
   if(a==='sessionToggle'){const m=minOf(arg);m.session=m.session?.need?{need:false}:{need:true,state:'필요'};save();planReviewModal(arg);render();return}
   if(a==='sessionDoc'){sessionDocModal(arg);return}
   if(a==='sesAI'){sesAI(arg);return}
+  if(a==='srDel'){const G=ncg(arg);delete G.group;save();pncModal(arg);render();return}
+  if(a==='subEdit'){const k=arg;const cur=(S.subCur||{})[k]||'';modal(`<div class="bar"><h2 style="flex:1;margin:0">화면 설명 고치기</h2><button class="btn sm" data-act="close">닫기</button></div><p class="note">제목 아래 설명 글입니다. 고치면 이 화면을 보는 모든 사람에게 바뀐 글이 보입니다. 비워서 저장하면 원래 글로 돌아갑니다.</p><form id="f-subtxt" data-k="${esc(k)}"><div class="field"><textarea id="st_t" rows="5">${esc((DB.TXT||{})[k]||cur)}</textarea></div><div class="bar"><button class="btn pri">저장</button>${(DB.TXT||{})[k]?`<button type="button" class="btn" data-act="subReset:${esc(k)}">원래 글로</button>`:''}</div></form>`);return}
+  if(a==='subReset'){if(DB.TXT)delete DB.TXT[arg];save();closeModal();render();toast('원래 글로 돌렸습니다');return}
   if(a==='sesWord'){const m=minOf(arg);if(!m||!m.sesDoc)return;sesSync(m);save();(async()=>{try{exportOut(safeN(`당회보고_${m.name}`)+'.docx',await sesDocxBlob(m),m.id)}catch(e){toast('Word 파일을 만들지 못했습니다. 양식을 확인해 주세요')}})();return}
   if(a==='sesTplDel'){delete DB.set.sesDocx;save();render();toast('교회 양식을 뺐습니다. 기본 양식으로 만듭니다');return}
   if(a==='sesTplSample'){saveFile('당회 보고 양식 (샘플).docx',docxBlob(sesTplBlocks()));return}
@@ -3241,7 +3281,7 @@ document.addEventListener('click',e=>{
   if(a==='ncNew'){ncNewModal();return}
   if(a==='assign'){const n=ncOf(x1);n.carer=x2;n.status='교육 중';Adapter.notify(nm(x2),`${n.name} 성도 담당으로 배정되었습니다`);go();toast(`${nm(x2)}에게 배정 알림을 보냈습니다`);return}
   if(a==='nudge'){const n=ncOf(arg);Adapter.notify(nm(n.carer),`${n.name} 성도에게 안부 연락을 부탁드립니다`);save();toast(`${nm(n.carer)}에게 알림을 보냈습니다`);return}
-  if(a==='att'){const n=ncOf(x1);n.attend[+x2]=n.attend[+x2]?0:1;save();if(document.querySelector('.ov'))ncModal(n.id);render();return}
+  if(a==='att'){const n=ncOf(x1);n.attend[+x2]=n.attend[+x2]?0:1;n.attD=n.attD||[];n.attD[+x2]=n.attend[+x2]?TODAY:null;save();if(document.querySelector('.ov'))ncModal(n.id);render();return}
   if(a==='graduate'){const n=ncOf(arg);n.status='수료';save();if(document.querySelector('.ov'))ncModal(n.id);render();toast('수료 처리했습니다');return}
   if(a==='handoff'){const n=ncOf(arg);n.status='교구 인계';Adapter.notify(`${n.gu} 담당 교역자`,'6주 기록 요약 전달: '+n.name+' 성도');closeModal();go();toast(`${n.gu} 담당 교역자에게 인계했습니다`);return}
   if(a==='log'){logModal(x1,x2);return}
@@ -3323,6 +3363,9 @@ document.addEventListener('submit',async e=>{
   if(f.id==='f-ev'){const ev=DB.EVENTS.find(x=>x.id===f.dataset.eid);const ids=[...f.querySelectorAll('[data-nc]:checked')].map(x=>x.dataset.nc);if(!ids.length){toast('받는 분을 골라 주세요');return}ids.forEach(id=>ncOf(id).contacts.push({date:TODAY,type:'안내',note:ev.title+' 안내'}));Adapter.log(`${nm(S.uid)} → 새가족 ${ids.length}명`,`${ev.title} 안내 (앱 알림 · 문자)`);done(`${ids.length}명에게 보냈습니다 (샘플: 기록만)`);return}
   if(f.id==='f-kj'){const g=curGU();DB.KJ=DB.KJ||{};kjOf(g);const K=DB.KJ[g.name];K.list.push({id:uid('k'),name:v('kjn').trim(),title:v('kjt').trim(),zone:v('kjz'),reg:v('kjr')||TODAY,lastAtt:'',att8:null,ev:[],ex:document.getElementById('kje')?v('kje').trim():'',lastV:null});done('기본 사항을 넣었습니다');return}
   if(f.id==='f-nasq'){const q=v('nasq').trim();nasS().q=q;if(!q){const N=nasS();N.res=null;render();return}nasSearch(q);return}
+  if(f.id==='f-ncshare'){const n=ncOf(f.dataset.id);if(!n)return;n.share=v('ncs').trim().slice(0,200);save();toast('교역자에게 전할 말을 저장했습니다');return}
+  if(f.id==='f-ncsr'){const id=f.dataset.id;const nmv=v('sr_n').trim();if(!nmv){toast('사랑방 이름을 넣어 주세요');return}ncg(id).group={name:nmv,leader:v('sr_d').trim(),state:v('sr_s'),date:v('sr_t'),by:S.uid};save();pncModal(id);render();toast('사랑방 연결을 저장했습니다');return}
+  if(f.id==='f-subtxt'){const k=f.dataset.k;DB.TXT=DB.TXT||{};const t=v('st_t').trim();if(t)DB.TXT[k]=t;else delete DB.TXT[k];Adapter.log('최종 관리자','화면 설명 수정');save();closeModal();render();toast('설명을 바꿨습니다. 모든 사람에게 같이 보입니다');return}
   if(f.id==='f-sesdoc'){const m=minOf(f.dataset.mid);sesSync(m);save();toast('고친 내용을 저장했습니다');return}
   if(f.id==='f-ses'){const L=v('ses_s').split('\n').map(x=>x.trim()).filter(Boolean).slice(0,12);DB.set.sesSecs=L.length?L:null;done('보고서 항목을 저장했습니다');return}
   if(f.id==='f-set2'){DB.set.sessionLimit=Number(v('ssl'))||DB.set.sessionLimit;done('기획 승인 규칙을 저장했습니다');return}
