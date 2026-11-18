@@ -25,7 +25,7 @@ function doPost(e) {
   try {
     const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     const who = check_(req.token);
-    if (!who) return out_({ error: 'login' });
+    if (!who || who.fail) return out_({ error: 'login', why: who ? who.fail : 'token' });
 
     if (req.action === 'usage') {
       if (!who.owner) return out_({ error: 'owner_only' });
@@ -72,14 +72,15 @@ function doPost(e) {
 
 // 로그인 확인 + 승인 여부 (폴더 공유 여부)
 function check_(token) {
-  if (!token) return null;
+  if (!token) return { fail: 'token' };
   const r = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?access_token=' + encodeURIComponent(token), { muteHttpExceptions: true });
-  if (r.getResponseCode() !== 200) return null;
+  if (r.getResponseCode() !== 200) return { fail: 'token' };
   const t = JSON.parse(r.getContentText());
-  const cid = P.getProperty('CLIENT_ID');
-  if (!cid || (t.aud !== cid && t.azp !== cid)) return null;           // 우리 플랫폼에서 받은 로그인만 인정
+  const cid = String(P.getProperty('CLIENT_ID') || '').trim();
+  if (!cid) return { fail: 'no_client_id' };
+  if (t.aud !== cid && t.azp !== cid) return { fail: 'aud' };          // 우리 플랫폼에서 받은 로그인만 인정
   const email = String(t.email || '').toLowerCase();
-  if (!email || String(t.email_verified) !== 'true') return null;
+  if (!email || String(t.email_verified) !== 'true') return { fail: 'email' };
   const me = Session.getEffectiveUser().getEmail().toLowerCase();
   const admins = String(P.getProperty('ADMIN_EMAILS') || '').toLowerCase().split(/[\s,]+/).filter(String);
   if (email === me || admins.indexOf(email) >= 0) return { email: email, owner: true };
@@ -87,7 +88,7 @@ function check_(token) {
   const cache = CacheService.getScriptCache();
   const c = cache.get('m_' + email);
   if (c === '1') return { email: email, owner: false };
-  if (c === '0') return null;
+  if (c === '0') return { fail: 'member' };
   let ok = false;
   const it = DriveApp.getFoldersByName(P.getProperty('FOLDER_NAME') || '사역 플랫폼 DB');
   while (it.hasNext()) {
@@ -98,7 +99,7 @@ function check_(token) {
     }
   }
   cache.put('m_' + email, ok ? '1' : '0', 600);                       // 10분 동안 기억 (승인 해제도 10분 안에 반영)
-  return ok ? { email: email, owner: false } : null;
+  return ok ? { email: email, owner: false } : { fail: 'member' };
 }
 
 // 하루 사용 횟수 세기

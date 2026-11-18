@@ -389,6 +389,13 @@ table.pd{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:6px;ta
 }
 .ounit{flex:0 0 7.5em;word-break:keep-all}
 @media(min-width:601px) and (max-width:1000px){.t cite{display:inline-block;min-width:9em}}
+
+/* 줄바꿈: 한글은 낱말 단위로, 너무 긴 주소 · 이메일만 필요할 때 끊음 */
+body{word-break:keep-all;overflow-wrap:break-word;line-break:strict}
+h1,h2,h3,.sub,.note,.tip,.rm,.secl,.ahelp,p,li,label,td,th,.chip,.btn{word-break:keep-all}
+.bnav .nav,.tabs button,.tabs a,.chip,.btn,.cnt{white-space:nowrap}
+.brk{word-break:break-all!important;overflow-wrap:anywhere}
+a[href^="http"],code{overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -1415,13 +1422,13 @@ function gSignOut(){try{if(GT.tok&&window.google&&google.accounts)google.account
 const aiKeyGet=()=>{try{return localStorage.getItem(KEY+'-aikey')||''}catch(e){return ''}};
 /* ---- AI 연결 · 사용량 (최종 관리자 전용) ---- */
 async function aiAdm(action,extra){const r=await fetch(GD.ai.relayUrl,{method:'POST',headers:{'content-type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({token:GT.tok,action},extra||{}))});return r.json()}
-function aiAdmErr(e){return e==='owner_only'?'AI 중계가 이 계정을 최종 관리자로 알아보지 못합니다. Apps Script 스크립트 속성 ADMIN_EMAILS에 이 이메일을 넣어 주세요.':e==='login'?'로그인 확인에 실패했습니다. 로그아웃 뒤 다시 로그인해 주세요.':e==='bad_value'?'값을 확인해 주세요 (횟수는 1~1000, 모델은 claude-로 시작).':'AI 중계 오류: '+e}
-function aiAdmLoad(){if(!(GD&&GD.ai&&GD.ai.relayUrl&&CL.owner))return;S.aiAdm=Object.assign({},S.aiAdm||{},{busy:1});aiAdm('usage').then(j=>{S.aiAdm=j.error?{err:aiAdmErr(j.error)}:{loaded:1,usage:j.usage||[],v:j.v||1,cfg:j.cfg||null}}).catch(()=>{S.aiAdm={err:'AI 중계에 연결하지 못했습니다. config.js의 relayUrl과 Apps Script 배포(액세스: 모든 사용자)를 확인해 주세요.'}}).finally(()=>{if(S.view==='set')render()})}
+function aiAdmErr(e,why){if(e==='login'&&why)return ({no_client_id:'Apps Script 스크립트 속성에 CLIENT_ID가 없습니다. config.js의 clientId와 같은 값을 넣고 새 버전으로 다시 배포해 주세요.',aud:'Apps Script의 CLIENT_ID가 config.js의 clientId와 다릅니다. 같은 값으로 고치고 새 버전으로 다시 배포해 주세요.',token:'로그인 정보가 만료됐습니다. 로그아웃 뒤 다시 로그인해 주세요.',email:'구글 계정 이메일을 확인하지 못했습니다. 로그아웃 뒤 다시 로그인해 주세요.',member:'이 계정이 자료 폴더 공유 대상이 아닙니다. FOLDER_NAME이 config.js의 folderName과 같은지 확인해 주세요.'})[why]||'로그인 확인 실패 ('+why+')';return e==='owner_only'?'AI 중계가 이 계정을 최종 관리자로 알아보지 못합니다. Apps Script 스크립트 속성 ADMIN_EMAILS에 이 이메일을 넣어 주세요.':e==='login'?'AI 중계가 로그인을 확인하지 못했습니다. Apps Script 스크립트 속성의 CLIENT_ID가 config.js의 clientId와 똑같은지 확인하고, 새 ai-relay.gs로 다시 배포하면 정확한 원인이 여기에 나옵니다.':e==='bad_value'?'값을 확인해 주세요 (횟수는 1~1000, 모델은 claude-로 시작).':'AI 중계 오류: '+e}
+function aiAdmLoad(){if(!(GD&&GD.ai&&GD.ai.relayUrl&&CL.owner))return;S.aiAdm=Object.assign({},S.aiAdm||{},{busy:1});aiAdm('usage').then(j=>{S.aiAdm=j.error?{err:aiAdmErr(j.error,j.why)}:{loaded:1,usage:j.usage||[],v:j.v||1,cfg:j.cfg||null}}).catch(()=>{S.aiAdm={err:'AI 중계에 연결하지 못했습니다. config.js의 relayUrl과 Apps Script 배포(액세스: 모든 사용자)를 확인해 주세요.'}}).finally(()=>{if(S.view==='set')render()})}
 function aiAdminCard(){if(!CL.owner)return '';if(!(GD.ai&&GD.ai.relayUrl))return aiKeyCard();const A=S.aiAdm||{};const c=A.cfg||{};
   const nmOf=em=>{const e=Object.values(DB.U).find(u=>clLow(u.email)===clLow(em));return e?e.name:em};const L=(A.usage||[]).slice().sort((x,y)=>y.n-x.n);const tot=L.reduce((a,x)=>a+x.n,0);
   const isAd=em=>clLow(em)===clLow(CL.me?.email)||(c.admins||[]).map(clLow).includes(clLow(em));
-  const url=GD.ai.relayUrl;const mu=url.length>46?url.slice(0,30)+'…'+url.slice(-12):url;
-  const row=(k,v)=>`<div class="row"><span style="flex:1" class="rm">${k}</span><span style="text-align:right;word-break:break-all">${v}</span></div>`;
+  const url=GD.ai.relayUrl;const mu=url.replace(/^https:\/\/script\.google\.com\/macros\/s\//,'Apps Script · ').replace(/^(Apps Script · .{6}).+(.{6}\/exec)$/,'$1…$2');
+  const row=(k,v)=>`<div class="row" style="flex-wrap:wrap;gap:2px 12px"><span style="flex:1 1 auto" class="rm">${k}</span><span style="text-align:right;margin-left:auto" class="brk">${v}</span></div>`;
   return `<div class="card"><div class="bar"><h2 style="margin:0;flex:1">AI 연결 · 사용량</h2><span class="chip ${A.err?'q':A.loaded?'g':''}">${A.err?'확인 필요':A.loaded?'연결됨':'확인 중'}</span></div>
   <p class="note" style="margin-top:4px">승인된 사람은 이 AI 중계로 AI를 씁니다. AI 키는 구글 Apps Script 비밀 저장소에만 있고 이 화면 · 깃허브 · 다른 사람에게 보이지 않습니다. 사용량과 한도는 최종 관리자만 봅니다.</p>
   ${A.err?`<p class="tip">${esc(A.err)}</p>`:''}
