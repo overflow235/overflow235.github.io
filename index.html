@@ -97,6 +97,12 @@ h3{font-size:14.5px;font-weight:650;margin:20px 0 8px;letter-spacing:-.01em}
 .chip.w{background:var(--warn-soft);color:var(--warn)}
 .chip.q{background:transparent;color:var(--mute);box-shadow:inset 0 0 0 1px var(--line)}
 button.chip{min-height:30px}
+.nasq{display:flex;gap:8px;margin:0}.nasq .search{flex:1;margin:0;min-width:0}.nasq .btn{flex:none}
+.nasbar{margin:10px 0 6px;flex-wrap:wrap;gap:6px;align-items:center}
+.nasrow{gap:10px;flex-wrap:nowrap!important;align-items:center}.nasrow>.bar{flex-wrap:nowrap!important;margin:0!important;width:auto!important}.nasi{flex:none;width:28px;text-align:center;font-size:20px}
+.nasw{display:block;font-size:13px;color:var(--ink2);margin:2px 0}
+.nash{font-size:15px;margin:16px 0 4px}
+.nasmenu .row{gap:12px;text-decoration:none;font-size:15px}
 .pchip{min-height:36px;border-radius:8px;border:1px solid var(--line2);background:var(--bg);padding:0 12px;font-size:13.5px;color:var(--ink2)}
 .pchip.on{background:var(--btn);border-color:var(--btn);color:var(--btn-ink)}
 .list{display:flex;flex-direction:column}
@@ -1447,32 +1453,81 @@ async function gTidy(quiet){if(!(GD&&CL.holder)){if(!quiet)toast('자료 폴더�
     GPRIV.tidy=1;gPrivSave();if(!quiet||n)toast(n?`관리자 전용 폴더로 ${n}개를 옮겼습니다`:'이미 정리되어 있습니다');if(S.view==='set')render()}catch(e){if(!quiet)toast('드라이브를 정리하지 못했습니다')}}
 async function gMkFolders(){if(!GDF.root)return;const yr=TODAY.slice(0,4);let n=0;toast('폴더를 만드는 중입니다');try{for(const t of DB.TEAMS){await gPath(['팀별 자료',t.name,yr]);n++}for(const u of Object.values(DB.U)){if(u.name&&u.pid){await gPath(['사역자 자료',u.name]);n++}}toast(`팀 · 사역자 폴더 ${n}개를 준비했습니다`)}catch(e){toast('폴더를 만들지 못했습니다')}}
 /* ---- 공유 자료실: 드라이브 폴더를 그대로 (팀별 / 연도, 사역자별) ---- */
-const NAS={tree:null,at:0};
-async function nasTree(){if(NAS.tree&&Date.now()-NAS.at<300000)return NAS.tree;const L=await gList(`mimeType='${FOLD}' and trashed=false`,'files(id,name,parents)');const by={},kids={};L.forEach(f=>{by[f.id]=f;(f.parents||[]).forEach(p=>(kids[p]=kids[p]||[]).push(f.id))});const T={};T[GDF.root]={name:'공유 자료실',parent:null,path:[]};const Q=[GDF.root];while(Q.length){const id=Q.shift();(kids[id]||[]).forEach(k=>{if(T[k])return;T[k]={name:by[k].name,parent:id,path:T[id].path.concat(by[k].name)};Q.push(k)})}NAS.tree=T;NAS.at=Date.now();return T}
+const NAS={tree:null,at:0,cat:null,catAt:0};
+async function nasTree(){if(NAS.tree&&Date.now()-NAS.at<300000)return NAS.tree;const L=await gList(`mimeType='${FOLD}' and trashed=false`,'files(id,name,parents)');const by={},kids={};L.forEach(f=>{by[f.id]=f;(f.parents||[]).forEach(p=>(kids[p]=kids[p]||[]).push(f.id))});const T={};T[GDF.root]={name:'공유 자료실',parent:null,path:[]};const Q=[GDF.root];while(Q.length){const id=Q.shift();(kids[id]||[]).forEach(k=>{if(T[k])return;T[k]={name:by[k].name,parent:id,path:T[id].path.concat(by[k].name)};Q.push(k)})}NAS.tree=T;NAS.at=Date.now();NAS.cat=null;return T}
 const NASF='files(id,name,mimeType,modifiedTime,size,parents,owners(displayName,emailAddress),webViewLink)';
+const myMail=()=>{let e='';try{e=localStorage.getItem(KEY+'-gmail')||''}catch(x){}return clLow(e||CL.me?.email||String(CL.uid||'').replace(/^g:/,''))};
 function nasS(){return S.nas||(S.nas={cur:null,items:null,res:null,q:''})}
-async function nasGo(id){const N=nasS();N.busy=1;N.res=null;N.ai=null;N.err='';try{const T=await nasTree();if(!id||!T[id])id=GDF.root;const L=await gList(`'${id}' in parents and trashed=false`,NASF);N.cur=id;N.items=L.filter(f=>id!==GDF.root||f.mimeType===FOLD).sort((a,b)=>(b.mimeType===FOLD)-(a.mimeType===FOLD)||a.name.localeCompare(b.name,'ko'))}catch(e){N.err='드라이브를 읽지 못했습니다. 잠시 뒤 다시 열어 주세요';N.items=[]}N.busy=0;if(S.lib==='nas')render()}
-function nasWhere(f,T){const p=(f.parents||[]).find(x=>T[x]);return p?T[p].path.join(' / '):''}
-async function nasSearch(q){const N=nasS();N.busy=1;N.ai=null;N.err='';render();try{const T=await nasTree();const L=await gList(`(name contains '${gq(q)}' or fullText contains '${gq(q)}') and trashed=false and mimeType!='${FOLD}'`,NASF);N.res=L.filter(f=>(f.parents||[]).some(p=>T[p]&&p!==GDF.root)).map(f=>Object.assign(f,{where:nasWhere(f,T)}));N.rq=q}catch(e){N.err='찾지 못했습니다'}N.busy=0;render()}
-async function nasAI(q){const N=nasS();N.busy=1;N.err='';render();try{const T=await nasTree();const ids=Object.keys(T).filter(x=>x!==GDF.root);let all=[];for(let i=0;i<ids.length;i+=25){const part=ids.slice(i,i+25).map(x=>`'${x}' in parents`).join(' or ');all=all.concat(await gList(`(${part}) and trashed=false and mimeType!='${FOLD}'`,NASF))}
-    all.forEach(f=>f.where=nasWhere(f,T));const cat=all.slice(0,500).map((f,i)=>({n:i,이름:f.name,위치:f.where,올린사람:f.owners?.[0]?.displayName||'',날짜:(f.modifiedTime||'').slice(0,10)}));
-    const sm=await getSampler();if(!sm){N.busy=0;toast('AI에 연결되지 않아 이름으로 찾습니다');return nasSearch(q)}
-    const r=await sm(`너는 교회 공유 자료실에서 파일을 찾아 주는 도우미다. 아래 파일 목록(이름 · 위치 · 올린 사람 · 날짜)만 보고 질문에 맞는 파일을 고른다. 목록에 없는 파일은 만들지 말고, 맞는 것이 없으면 빈 목록을 준다. 맞는 순서로 최대 8개. JSON으로만 답한다: {"pick":[번호],"say":"한두 문장 한국어 설명"}\n질문: ${q}\n목록: ${JSON.stringify(cat)}`,{cache:false});
-    let j={};try{j=JSON.parse((String(r.text).match(/\{[\s\S]*\}/)||['{}'])[0])}catch(e){}N.res=(j.pick||[]).map(n=>all[n]).filter(Boolean);N.ai=j.say||(N.res.length?'':'맞는 파일을 찾지 못했습니다.');N.rq=q}catch(e){N.err='AI로 찾지 못했습니다'}N.busy=0;render()}
+function nasHide(f){return /^app2__/.test(f.name||'')||(f.parents||[]).includes(GDF.root)&&/json$/.test(f.mimeType||'')}
+function nasWhere(f,T){const p=(f.parents||[]).find(x=>T[x]);return p?(T[p].path.join(' / ')||'공유 자료실'):''}
+/* 자료실 전체 파일 목록 (2분 동안 기억) */
+async function nasCat(force){if(!force&&NAS.cat&&Date.now()-NAS.catAt<120000)return NAS.cat;const T=await nasTree();const ids=Object.keys(T);let all=[];for(let i=0;i<ids.length;i+=25){const part=ids.slice(i,i+25).map(x=>`'${x}' in parents`).join(' or ');all=all.concat(await gList(`(${part}) and trashed=false and mimeType!='${FOLD}'`,NASF))}
+  const seen=new Set();all=all.filter(f=>!nasHide(f)&&!seen.has(f.id)&&seen.add(f.id));all.forEach(f=>f.where=nasWhere(f,T));all.sort((a,b)=>String(b.modifiedTime||'').localeCompare(String(a.modifiedTime||'')));NAS.cat=all;NAS.catAt=Date.now();return all}
+function nasById(id){const N=nasS();return [...(N.items||[]),...(NAS.cat||[]),...(N.res||[]),...(N.aiRes||[]),...(N.more||[])].find(x=>x.id===id)}
+async function nasGo(id){const N=nasS();N.busy=1;N.res=null;N.err='';try{const T=await nasTree();if(!id||!T[id])id=GDF.root;const L=await gList(`'${id}' in parents and trashed=false`,NASF);N.cur=id;N.items=L.filter(f=>!nasHide(f)).map(f=>Object.assign(f,{where:nasWhere(f,T)})).sort((a,b)=>(b.mimeType===FOLD)-(a.mimeType===FOLD)||a.name.localeCompare(b.name,'ko'));if(id===GDF.root)nasCat().then(()=>{if(S.lib==='nas'&&!nasS().res)render()}).catch(()=>{})}catch(e){N.err='드라이브를 읽지 못했습니다. 잠시 뒤 다시 열어 주세요';N.items=[]}N.busy=0;if(S.lib==='nas')render()}
+/* 찾기: 이름 · 폴더 · 올린 사람(띄어쓰기 무시) + 파일 안 글(드라이브 본문 검색) → AI가 필요에 맞게 골라 줌 */
+const nasNz=x=>String(x||'').toLowerCase().replace(/[\s_\-·.,()\[\]{}'"~!@#$%^&+=]+/g,'');
+function nasLocal(cat,q){const ts=String(q).split(/\s+/).map(nasNz).filter(Boolean);if(!ts.length)return [];return cat.map(f=>{const nm=nasNz(f.name),all=nm+nasNz(f.where)+nasNz(f.owners?.[0]?.displayName);if(!ts.every(t=>all.includes(t)))return null;return {f,sc:ts.filter(t=>nm.includes(t)).length}}).filter(Boolean).sort((a,b)=>b.sc-a.sc).map(x=>x.f)}
+async function nasBody(q,ids){try{return (await gList(`fullText contains '${gq(q)}' and trashed=false and mimeType!='${FOLD}'`,'files(id)')).map(f=>f.id).filter(id=>ids.has(id))}catch(e){return []}}
+async function nasFind(q){const N=nasS();const tk=Date.now();N.tk=tk;N.busy=1;N.err='';N.ai=null;N.aiRes=null;N.more=null;N.kw=null;N.res=null;N.rq=q;render();
+  let cat=[];try{cat=await nasCat()}catch(e){N.busy=0;N.err='드라이브를 읽지 못했습니다';render();return}
+  const ids=new Set(cat.map(f=>f.id)),by=Object.fromEntries(cat.map(f=>[f.id,f]));
+  const loc=nasLocal(cat,q),body=await nasBody(q,ids);const bset=new Set(body);
+  if(N.tk!==tk)return;N.res=[...new Set([...loc.map(f=>f.id),...body])].map(id=>Object.assign(by[id],{hit:bset.has(id)&&!loc.includes(by[id])?'파일 안 글에 있음':''}));N.busy=0;
+  const sm=cat.length?await getSampler():null;if(!sm){N.noai=1;render();return}N.noai=0;N.aiBusy=1;render();
+  try{const list=cat.slice(0,400).map((f,i)=>({n:i,이름:f.name,위치:f.where,올린사람:f.owners?.[0]?.displayName||'',날짜:(f.modifiedTime||'').slice(0,10),...(bset.has(f.id)?{본문일치:1}:{})}));
+    const r=await sm(`너는 교회 공유 자료실의 사서다. 사역자가 적은 필요(질문)를 이해하고, 아래 파일 목록에서 그 필요에 도움이 될 파일을 고른다.\n- 이름에 같은 낱말이 없어도 주제 · 용도 · 비슷한 말이 맞으면 고른다 (예: "세속" → 세속화, 세상 문화, 포스트모던, 문화 변혁).\n- "본문일치":1 은 파일 안 글에 질문 낱말이 들어 있다는 뜻이다.\n- 목록에 없는 파일은 절대 만들지 않는다. 맞는 것이 없으면 pick을 비운다. 최대 8개, 맞는 순서로.\n- 드라이브 본문 검색에 쓸 비슷한 낱말 3~5개를 kw에 준다 (한두 단어씩).\nJSON으로만 답한다: {"pick":[번호],"why":{"번호":"이 파일이 왜 맞는지 한 줄"},"say":"한두 문장 한국어 안내","kw":["낱말"]}\n질문: ${q}\n목록: ${JSON.stringify(list)}`,{cache:false});
+    let j={};try{j=JSON.parse((String(r.text).match(/\{[\s\S]*\}/)||['{}'])[0])}catch(e){}
+    if(N.tk!==tk)return;const why=j.why||{};N.aiRes=(j.pick||[]).filter(n=>cat[n]).map(n=>Object.assign({},cat[n],{why:why[n]||why[String(n)]||''}));N.ai=j.say||(N.aiRes.length?'':'필요에 딱 맞는 파일을 찾지 못했습니다. 다른 말로 적어 보세요.');
+    N.kw=(Array.isArray(j.kw)?j.kw:[]).map(x=>String(x).trim()).filter(x=>x&&x.length<=20).slice(0,5);
+    if(N.kw.length){const got=new Set([...(N.res||[]).map(f=>f.id),...N.aiRes.map(f=>f.id)]);const extra=[];for(const k of N.kw){nasLocal(cat,k).forEach(f=>extra.push(f.id));(await nasBody(k,ids)).forEach(id=>extra.push(id))}if(N.tk!==tk)return;N.more=[...new Set(extra)].filter(id=>!got.has(id)).slice(0,20).map(id=>by[id])}
+  }catch(e){if(N.tk===tk)N.ai='AI가 지금 답하지 않아 이름 · 내용으로 찾은 결과만 보여 드립니다.'}
+  if(N.tk!==tk)return;N.aiBusy=0;render()}
 function nasCanUp(T,id){const p=(T&&T[id]&&T[id].path)||[];return (p[0]==='팀별 자료'&&p.length>=2)||(p[0]==='사역자 자료'&&p[1]===myNm())}
-async function nasUpload(files){const N=nasS();const T=NAS.tree;if(!nasCanUp(T,N.cur)){toast('팀 폴더나 내 폴더 안에서 올려 주세요');return}let n=0;for(const f of files){if(f.size>50*1048576){toast(`${f.name}: 50MB 이하만 올릴 수 있습니다`);continue}try{const r=await gCreate(f.name,N.cur,f.type||'application/octet-stream',f);n++;DB.I.push({id:uid('f'),kind:'파일',file:true,fileName:f.name,title:f.name.replace(/\.[a-z0-9]+$/i,''),size:f.size,ext:extOf(f.name),src:'공유 자료실',grade:'공개',owner:CL.uid||S.uid,date:TODAY,tags:['공유 자료실',...(T[N.cur]?.path||[])],body:'',gdId:r.id})}catch(e){toast(`${f.name}: 올리지 못했습니다`)}}if(n){save();toast(`${n}개를 올렸습니다`)}nasGo(N.cur)}
+/* 올리기: 팀 폴더 · 내 폴더 안이면 그곳에, 아니면 내 폴더(사역자 자료 / 내 이름)에 */
+async function nasUpload(files){const N=nasS();const T=NAS.tree||await nasTree();let to=N.cur,mine=false;if(!nasCanUp(T,to)){try{to=await gPath(['사역자 자료',myNm()]);mine=true}catch(e){toast('내 폴더를 만들지 못했습니다');return}}
+  const T2=await nasTree();let n=0;toast('올리는 중입니다');for(const f of files){if(f.size>50*1048576){toast(`${f.name}: 50MB 이하만 올릴 수 있습니다`);continue}try{const r=await gCreate(f.name,to,f.type||'application/octet-stream',f);n++;DB.I.push({id:uid('f'),kind:'파일',file:true,fileName:f.name,title:f.name.replace(/\.[a-z0-9]+$/i,''),size:f.size,ext:extOf(f.name),src:'공유 자료실',grade:'공개',owner:CL.uid||S.uid,date:TODAY,tags:['공유 자료실',...(T2[to]?.path||[])],body:'',gdId:r.id})}catch(e){toast(`${f.name}: 올리지 못했습니다`)}}
+  NAS.cat=null;if(n){save();toast(mine?`내 폴더(사역자 자료 / ${myNm()})에 ${n}개를 올렸습니다`:`${n}개를 올렸습니다`)}N.items=null;nasGo(to)}
+/* 내 자료에 보관만 되고 드라이브에 없는 파일 → 내 폴더로 */
+function nasLocalOnly(){return DB.I.filter(i=>i.file&&i.owner===(CL.uid||S.uid)&&!i.gdId&&i.src!=='로고스'&&i.grade!=='구독')}
+async function nasPushLocal(){const L=nasLocalOnly();if(!L.length)return;let to;try{to=await gPath(['사역자 자료',myNm()])}catch(e){toast('내 폴더를 만들지 못했습니다');return}toast('내 폴더로 옮기는 중입니다');let n=0;
+  for(const i of L){let b=null;try{b=await fget(i.id)}catch(e){}if(!b&&i.dataUrl)b=u8blob(i.dataUrl);if(!b)continue;try{const r=await gCreate(i.fileName||i.title||'파일',to,b.type||'application/octet-stream',b);i.gdId=r.id;n++}catch(e){}}
+  NAS.cat=null;save();toast(n?`${n}개를 내 폴더에 올렸습니다. 이제 찾기에 나옵니다`:'옮길 수 있는 파일이 없습니다 (이 기기에 원본이 없음)');nasS().items=null;nasGo(to)}
+/* 파일 다루기 */
+async function nasCopyMine(id){const f=nasById(id);try{const to=await gPath(['사역자 자료',myNm()]);await gf(`${DAPI}/${encodeURIComponent(id)}/copy?fields=id`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:f?f.name:'복사본',parents:[to]})});NAS.cat=null;toast('내 폴더에 저장했습니다')}catch(e){toast('저장하지 못했습니다')}}
+async function nasTrash(id){try{await gf(`${DAPI}/${encodeURIComponent(id)}?fields=id`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({trashed:true})});NAS.cat=null;const N=nasS();['items','res','aiRes','more'].forEach(k=>{if(N[k])N[k]=N[k].filter(x=>x.id!==id)});closeModal();render();toast('지웠습니다 (드라이브 휴지통에서 30일 안에 되살릴 수 있습니다)')}catch(e){toast('지우지 못했습니다. 내가 올린 파일만 지울 수 있습니다')}}
+function nasMore(id){const f=nasById(id);if(!f)return;const own=clLow(f.owners?.[0]?.emailAddress)===myMail();const par=(f.parents||[])[0];
+  modal(`<div class="bar"><h2 style="flex:1;margin:0;font-size:17px" class="brk">${esc(f.name)}</h2><button class="btn sm" data-act="close">닫기</button></div><p class="rm" style="margin:2px 0 12px">${esc(f.where||'')}${f.owners?.[0]?.displayName?' · '+esc(f.owners[0].displayName):''}${f.modifiedTime?' · '+esc(f.modifiedTime.slice(0,10)):''}${f.size?' · '+fsz(+f.size):''}</p>
+  <div class="list nasmenu">${f.webViewLink?`<a class="row" href="${esc(f.webViewLink)}" target="_blank" rel="noopener">👀 <span>열어 보기</span></a>`:''}<button class="row" data-act="nasDl:${f.id}">⬇️ <span>내려받기 (휴대폰 · PC에 저장)</span></button>${f.where===('사역자 자료 / '+myNm())?'':`<button class="row" data-act="nasCopy:${f.id}">📥 <span>내 폴더에 저장 (자료실 안에 복사)</span></button>`}${f.webViewLink?`<button class="row" data-act="nasLink:${f.id}">🔗 <span>링크 복사 (승인된 사역자는 바로 열림)</span></button>`:''}${navigator.share&&f.webViewLink?`<button class="row" data-act="nasSend:${f.id}">📤 <span>카톡 · 문자로 보내기</span></button>`:''}${par?`<button class="row" data-act="nasOpen:${par}">📁 <span>들어 있는 폴더로 가기</span></button>`:''}${own?`<button class="row" data-act="nasDel:${f.id}" style="color:var(--bad,#e5484d)">🗑️ <span>지우기 (내가 올린 파일)</span></button>`:''}</div>`)}
 const fsz=b=>!b?'':b>1048576?(b/1048576).toFixed(1)+'MB':Math.max(1,Math.round(b/1024))+'KB';
-function nasRow(f){const isF=f.mimeType===FOLD;const who=f.owners?.[0]?.displayName||'';return `<div class="row" style="align-items:center"><span style="flex:1;min-width:0">${isF?`<button class="lnk rt" data-act="nasOpen:${f.id}" style="all:unset;cursor:pointer;font-weight:600">📁 ${esc(f.name)}</button>`:`<span class="rt">📄 ${esc(f.name)}</span>`}<br><span class="rm">${f.where?esc(f.where)+' · ':''}${isF?'폴더':[who,(f.modifiedTime||'').slice(0,10),fsz(+f.size)].filter(Boolean).map(esc).join(' · ')}</span></span>${isF?'':`<span class="bar" style="flex:none;gap:6px">${f.webViewLink?`<a class="btn sm" href="${esc(f.webViewLink)}" target="_blank" rel="noopener">열기</a>`:''}<button class="btn sm" data-act="nasDl:${f.id}">받기</button></span>`}</div>`}
+const nasIco=f=>f.mimeType===FOLD?'📁':/pdf/.test(f.mimeType)?'📕':/image/.test(f.mimeType)?'🖼️':/video/.test(f.mimeType)?'🎬':/audio/.test(f.mimeType)?'🎧':/sheet|excel|csv/.test(f.mimeType)?'📊':/presentation|powerpoint/.test(f.mimeType)?'📽️':/document|word|text/.test(f.mimeType)?'📝':'📄';
+function nasRow(f){const isF=f.mimeType===FOLD;const who=f.owners?.[0]?.displayName||'';
+  if(isF)return `<button class="row nasrow" data-act="nasOpen:${f.id}"><span class="nasi">📁</span><span style="flex:1;min-width:0"><span class="rt">${esc(f.name)}</span></span><span class="rm">›</span></button>`;
+  return `<div class="row nasrow"><span class="nasi">${nasIco(f)}</span><button type="button" data-act="nasMore:${f.id}" style="all:unset;cursor:pointer;flex:1;min-width:0"><span class="rt brk" style="display:block">${esc(f.name)}</span>${f.why?`<span class="nasw">✨ ${esc(f.why)}</span>`:''}<span class="rm" style="display:block">${[f.where,who,(f.modifiedTime||'').slice(0,10),fsz(+f.size)].filter(Boolean).map(esc).join(' · ')}${f.hit?' · <b>'+esc(f.hit)+'</b>':''}</span></button><span class="bar" style="flex:none;gap:6px">${f.webViewLink?`<a class="btn sm" href="${esc(f.webViewLink)}" target="_blank" rel="noopener">열기</a>`:''}<button class="btn sm" data-act="nasMore:${f.id}" aria-label="더 보기">⋯</button></span></div>`}
 function nasHTML(){if(!(GD&&GDF.root))return '<p class="empty">구글 드라이브에 연결된 운영판에서 쓸 수 있습니다.</p>';const N=nasS();if(N.items===null&&!N.busy)setTimeout(()=>nasGo(N.cur),0);const T=NAS.tree||{};
-  const crumbs=[];let c=N.cur;while(c&&T[c]){crumbs.unshift([c,T[c].name]);c=T[c].parent}
-  const up=nasCanUp(T,N.cur);
-  return `<p class="note" style="margin-top:0">승인된 사역자가 함께 보는 자료실입니다. <b>팀별 자료</b>는 팀 / 연도별로, <b>사역자 자료</b>는 사람마다 폴더가 있어서 올린 파일을 서로 찾아볼 수 있습니다. 구글 드라이브의 "${esc(GD.folderName||'')}" 폴더와 같습니다.</p>
-  <form id="f-nasq" class="bar" style="flex-wrap:nowrap;gap:8px"><input class="search" id="nasq" type="search" placeholder="파일 이름이나 내용으로 찾기" value="${esc(N.q||'')}" aria-label="공유 자료실 검색" style="flex:1;margin:0"><button class="btn">찾기</button><button class="btn" type="button" data-act="nasAI">AI로 찾기</button></form>
-  <div class="bar" style="margin:10px 0 6px;flex-wrap:wrap"><button class="pchip ${N.cur===GDF.root&&!N.res?'on':''}" data-act="nasHome">전체</button><button class="pchip" data-act="nasJump:팀별 자료">팀별 자료</button><button class="pchip" data-act="nasJump:사역자 자료">사역자 자료</button><button class="pchip" data-act="nasMine">내 폴더</button></div>
-  ${N.err?`<p class="tip">${esc(N.err)}</p>`:''}${N.busy?'<p class="rm">불러오는 중…</p>':''}
-  ${N.res?`<div class="bar" style="margin:6px 0"><b style="flex:1">"${esc(N.rq||'')}" 찾은 결과 ${N.res.length}개</b><button class="btn sm" data-act="nasBack">폴더로 돌아가기</button></div>${N.ai?`<p class="tip">🔎 ${esc(N.ai)}</p>`:''}<div class="list">${N.res.map(nasRow).join('')||'<p class="empty">찾은 파일이 없습니다.</p>'}</div>`
-  :`<div class="bar" style="margin:6px 0;flex-wrap:wrap;gap:4px">${crumbs.map(([id,n],i)=>i===crumbs.length-1?`<b>${esc(n)}</b>`:`<button class="btn sm" data-act="nasOpen:${id}">${esc(n)}</button><span class="rm">›</span>`).join('')}<span class="sp"></span>${up?`<label class="btn sm pri" for="nasup">이 폴더에 올리기</label><input id="nasup" type="file" multiple hidden>`:''}</div>
-  <div class="list">${(N.items||[]).map(nasRow).join('')||(N.busy?'':'<p class="empty">아직 파일이 없습니다.</p>')}</div>${!up&&N.cur!==GDF.root?'<p class="note">파일은 팀 폴더나 내 폴더 안에서 올릴 수 있습니다.</p>':''}`}`}
+  const crumbs=[];let c=N.cur;while(c&&T[c]){crumbs.unshift([c,T[c].name]);c=T[c].parent}const atRoot=!N.cur||N.cur===GDF.root;const lo=nasLocalOnly().length;
+  const top=`<form id="f-nasq" class="nasq"><input class="search" id="nasq" type="search" enterkeyhint="search" placeholder="무엇이 필요하세요? 예: 세속화 설교 자료, 수련회 포스터" value="${esc(N.q||'')}" aria-label="공유 자료실에서 찾기"><button class="btn pri">찾기</button></form>
+  <div class="bar nasbar"><button class="pchip ${atRoot&&!N.res?'on':''}" data-act="nasHome">전체</button><button class="pchip" data-act="nasJump:팀별 자료">팀별</button><button class="pchip" data-act="nasJump:사역자 자료">사역자</button><button class="pchip" data-act="nasMine">내 폴더</button><span class="sp"></span><label class="btn sm pri" for="nasup">＋ 올리기</label><input id="nasup" type="file" multiple hidden></div>
+  ${lo?`<p class="tip">"내 자료"에만 보관된 파일이 ${lo}개 있어 아직 자료실 찾기에 나오지 않습니다. <button class="btn sm" data-act="nasPush">내 폴더로 올리기</button></p>`:''}
+  ${N.err?`<p class="tip">${esc(N.err)}</p>`:''}`;
+  if(N.res){const kw=(N.kw||[]).map(k=>`<button class="pchip" data-act="nasKw:${esc(k)}">${esc(k)}</button>`).join('');
+    return top+`<div class="bar" style="margin:10px 0 4px"><b style="flex:1">"${esc(N.rq||'')}" 찾기</b><button class="btn sm" data-act="nasBack">폴더 보기</button></div>
+    ${N.busy?'<p class="rm">찾는 중…</p>':''}
+    ${N.aiBusy?'<p class="tip">✨ AI가 필요에 맞는 자료를 고르는 중입니다…</p>':''}
+    ${N.aiRes?`<h3 class="nash">✨ AI 추천</h3>${N.ai?`<p class="rm" style="margin:0 0 6px">${esc(N.ai)}</p>`:''}<div class="list">${N.aiRes.map(nasRow).join('')}</div>`:(!N.aiBusy&&N.ai?`<p class="rm">${esc(N.ai)}</p>`:'')}
+    ${N.busy?'':`<h3 class="nash">이름 · 내용에 "${esc(N.rq||'')}"가 들어간 파일 <span class="rm">${N.res.length}</span></h3><div class="list">${N.res.map(nasRow).join('')||'<p class="empty">없습니다.</p>'}</div>`}
+    ${N.more&&N.more.length?`<h3 class="nash">비슷한 말로 더 찾은 파일 <span class="rm">${N.more.length}</span></h3><div class="list">${N.more.map(nasRow).join('')}</div>`:''}
+    ${kw?`<p class="rm" style="margin:12px 0 4px">비슷한 말로 다시 찾기</p><div class="bar" style="flex-wrap:wrap;gap:6px">${kw}</div>`:''}
+    ${N.noai&&!N.busy?'<p class="note">AI 추천은 AI 연결이 되어 있을 때 함께 나옵니다.</p>':''}`}
+  const items=N.items||[];const fold=items.filter(f=>f.mimeType===FOLD),files=items.filter(f=>f.mimeType!==FOLD);const recent=atRoot?(NAS.cat||[]).slice(0,10):[];
+  return top+`${!atRoot?`<div class="bar" style="margin:10px 0 4px;flex-wrap:wrap;gap:4px">${crumbs.map(([id,n],i)=>i===crumbs.length-1?`<b>${esc(n)}</b>`:`<button class="btn sm" data-act="nasOpen:${id}">${esc(n)}</button><span class="rm">›</span>`).join('')}</div>`:''}
+  ${N.busy?'<p class="rm">불러오는 중…</p>':''}
+  ${fold.length?`<div class="list">${fold.map(nasRow).join('')}</div>`:''}
+  ${files.length?`<div class="list">${files.map(nasRow).join('')}</div>`:''}
+  ${atRoot&&recent.length?`<h3 class="nash">최근 올라온 자료</h3><div class="list">${recent.map(nasRow).join('')}</div>`:''}
+  ${!N.busy&&!items.length&&!recent.length?'<p class="empty">아직 파일이 없습니다. ＋ 올리기로 넣어 보세요.</p>':''}
+  <p class="note">승인된 사역자 모두가 함께 보는 자료실입니다 (구글 드라이브 "${esc(GD.folderName||'')}" 폴더). 내 폴더에 올린 파일도 다른 사역자가 찾아보고 내려받을 수 있습니다. 개인 · 구독 자료는 "내 자료"에 두세요.</p>`}
+
 document.addEventListener('change',e=>{if(e.target&&e.target.id==='nasup'&&e.target.files.length)nasUpload([...e.target.files])});
 async function gdBoot(){gisLoad().catch(()=>{});if(!GT.tok||GT.exp<Date.now()+60000){CL.err='glogin';render();return false}
   try{const me=await (await gf('https://www.googleapis.com/oauth2/v3/userinfo')).json();const email=clLow(me.email);try{localStorage.setItem(KEY+'-gmail',me.email||'')}catch(e){}
@@ -3185,13 +3240,20 @@ document.addEventListener('click',e=>{
   if(a==='stab'){S.stab=arg;render();return}
   if(a==='gIn'){gSignIn();return}
   if(a==='gOut'){gSignOut();return}
-  if(a==='nasOpen'){nasS().items=null;nasGo(arg);return}
+  if(a==='nasOpen'){closeModal();const N=nasS();N.res=null;N.items=null;nasGo(arg);return}
   if(a==='nasHome'){nasS().items=null;nasGo(GDF.root);return}
-  if(a==='nasBack'){const N=nasS();N.res=null;N.ai=null;render();return}
+  if(a==='nasBack'){const N=nasS();N.tk=0;N.res=null;N.ai=null;N.aiRes=null;N.more=null;N.kw=null;N.aiBusy=0;N.busy=0;if(N.items===null)nasGo(N.cur);else render();return}
   if(a==='nasJump'){(async()=>{try{const id=await gPath([arg]);nasS().items=null;nasGo(id)}catch(e){toast('폴더를 열지 못했습니다')}})();return}
   if(a==='nasMine'){(async()=>{try{const id=await gPath(['사역자 자료',myNm()]);nasS().items=null;await nasTree();nasGo(id)}catch(e){toast('내 폴더를 열지 못했습니다')}})();return}
-  if(a==='nasAI'){const q=(document.getElementById('nasq')?.value||'').trim();if(!q){toast('찾을 내용을 적어 주세요');return}nasS().q=q;nasAI(q);return}
-  if(a==='nasDl'){(async()=>{const f=[...(nasS().items||[]),...(nasS().res||[])].find(x=>x.id===arg);if(f&&/^application\/vnd\.google-apps\./.test(f.mimeType)){if(f.webViewLink)window.open(f.webViewLink,'_blank','noopener');return}try{toast('내려받는 중입니다');await saveFile(f?f.name:'파일',await gReadBlob(arg))}catch(e){toast('내려받지 못했습니다')}})();return}
+  if(a==='nasAI'){const q=(document.getElementById('nasq')?.value||'').trim();if(!q){toast('찾을 내용을 적어 주세요');return}nasS().q=q;nasFind(q);return}
+  if(a==='nasMore'){nasMore(arg);return}
+  if(a==='nasCopy'){closeModal();nasCopyMine(arg);return}
+  if(a==='nasLink'){const f=nasById(arg);if(f&&f.webViewLink){(navigator.clipboard?navigator.clipboard.writeText(f.webViewLink):Promise.reject()).then(()=>toast('링크를 복사했습니다. 승인된 사역자는 바로 열 수 있습니다')).catch(()=>{prompt('이 링크를 복사해 주세요',f.webViewLink)})}closeModal();return}
+  if(a==='nasSend'){const f=nasById(arg);if(f&&navigator.share)navigator.share({title:f.name,text:`${f.name} (${CHN()} 공유 자료실)`,url:f.webViewLink}).catch(()=>{});closeModal();return}
+  if(a==='nasDel'){const f=nasById(arg);if(f&&confirm(`"${f.name}"을(를) 지울까요?`))nasTrash(arg);return}
+  if(a==='nasPush'){nasPushLocal();return}
+  if(a==='nasKw'){const N=nasS();N.q=arg;nasFind(arg);return}
+  if(a==='nasDl'){closeModal();(async()=>{const f=nasById(arg);if(f&&/^application\/vnd\.google-apps\./.test(f.mimeType)){if(f.webViewLink)window.open(f.webViewLink,'_blank','noopener');return}try{toast('내려받는 중입니다');await saveFile(f?f.name:'파일',await gReadBlob(arg))}catch(e){toast('내려받지 못했습니다')}})();return}
   if(a==='gTidy'){gTidy(false);return}
   if(a==='gMkFolders'){gMkFolders();return}
   if(a==='hgSplash'){if(window.hgSplash)window.hgSplash();return}
@@ -3371,7 +3433,7 @@ document.addEventListener('submit',async e=>{
   if(f.id==='f-evadd'){DB.EVENTS.push({id:uid('ev'),title:v('ea'),date:v('eb'),easy:v('ec')});done('행사를 추가했습니다. 목자 화면에 바로 보입니다');return}
   if(f.id==='f-ev'){const ev=DB.EVENTS.find(x=>x.id===f.dataset.eid);const ids=[...f.querySelectorAll('[data-nc]:checked')].map(x=>x.dataset.nc);if(!ids.length){toast('받는 분을 골라 주세요');return}ids.forEach(id=>ncOf(id).contacts.push({date:TODAY,type:'안내',note:ev.title+' 안내'}));Adapter.log(`${nm(S.uid)} → 새가족 ${ids.length}명`,`${ev.title} 안내 (앱 알림 · 문자)`);done(`${ids.length}명에게 보냈습니다 (샘플: 기록만)`);return}
   if(f.id==='f-kj'){const g=curGU();DB.KJ=DB.KJ||{};kjOf(g);const K=DB.KJ[g.name];K.list.push({id:uid('k'),name:v('kjn').trim(),title:v('kjt').trim(),zone:v('kjz'),reg:v('kjr')||TODAY,lastAtt:'',att8:null,ev:[],ex:document.getElementById('kje')?v('kje').trim():'',lastV:null});done('기본 사항을 넣었습니다');return}
-  if(f.id==='f-nasq'){const q=v('nasq').trim();nasS().q=q;if(!q){const N=nasS();N.res=null;render();return}nasSearch(q);return}
+  if(f.id==='f-nasq'){const q=v('nasq').trim();const N=nasS();N.q=q;if(!q){N.tk=0;N.res=null;N.aiRes=null;N.aiBusy=0;render();return}document.getElementById('nasq')?.blur();nasFind(q);return}
   if(f.id==='f-ncshare'){const n=ncOf(f.dataset.id);if(!n)return;n.share=v('ncs').trim().slice(0,200);save();toast('교역자에게 전할 말을 저장했습니다');return}
   if(f.id==='f-ncsr'){const id=f.dataset.id;const nmv=v('sr_n').trim();if(!nmv){toast('사랑방 이름을 넣어 주세요');return}ncg(id).group={name:nmv,leader:v('sr_d').trim(),state:v('sr_s'),date:v('sr_t'),by:S.uid};save();pncModal(id);render();toast('사랑방 연결을 저장했습니다');return}
   if(f.id==='f-subtxt'){if(!(CLOUD?CL.owner:S.role==='admin')){closeModal();toast('최종 관리자만 고칠 수 있습니다');return}const k=f.dataset.k;DB.TXT=DB.TXT||{};const t=v('st_t').trim();if(t)DB.TXT[k]=t;else delete DB.TXT[k];Adapter.log('최종 관리자','화면 설명 수정');save();closeModal();render();toast('설명을 바꿨습니다. 모든 사람에게 같이 보입니다');return}
