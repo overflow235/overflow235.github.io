@@ -1,0 +1,370 @@
+/**
+ * 교회 사역 플랫폼 · AI 중계 (Google Apps Script · 무료)
+ *
+ * - AI 키를 여기(스크립트 속성)에만 보관합니다. 웹 화면 · 깃허브에는 키가 없습니다.
+ * - 플랫폼에 로그인한 사람의 구글 로그인 정보를 확인하고,
+ *   배포한 사람 드라이브의 자료 폴더(config.js의 folderName)를 공유받은 사람(=승인된 사람)만 AI를 쓰게 합니다.
+ * - 사람마다 하루 사용 횟수를 제한합니다.
+ * - 최종 관리자는 플랫폼 "시스템 설정"에서 오늘 사용량을 보고, 한도 · 모델을 바꿀 수 있습니다.
+ *   (AI 키는 여기 스크립트 속성에서만 바꿉니다. 플랫폼 화면으로는 절대 보내지 않습니다.)
+ *
+ * 스크립트 속성 (프로젝트 설정 → 스크립트 속성):
+ *   AI_API_KEY    : sk-ant-... (필수)
+ *   CLIENT_ID     : config.js 의 clientId 와 같은 값 (필수)
+ *   DAILY_LIMIT   : 1인 하루 AI 사용 횟수 (기본 30)
+ *   OWNER_LIMIT   : 최종 관리자 하루 사용 횟수 (기본 300)
+ *   FOLDER_NAME   : 자료 폴더 이름 (config.js의 folderName과 똑같이)
+ *   ADMIN_EMAILS  : (선택) 최종 관리자를 넘겨받은 사람 이메일. 여러 명은 쉼표로. 관리자 한도 · 사용량 보기 적용
+ *   AI_MODEL      : 기본 모델 (기본 claude-sonnet-5-5)
+ *   AI_MODEL_FAST : 빠른 모델 (기본 claude-haiku-5-5)
+ *
+ * [드라이브 대행] (config.js 의 driveMode: "relay" 일 때)
+ *  - 사역자는 구글 "이메일 확인" 로그인만 합니다 (드라이브 권한 없음 → 구글 경고 화면 없음).
+ *  - 드라이브 읽기 · 쓰기는 이 스크립트가 배포한 사람(자료 주인) 권한으로 대신 합니다.
+ *  - 승인된 사역자는 자료 폴더(FOLDER_NAME) 안의 파일만 다룰 수 있습니다. 그 밖의 드라이브 파일은 막습니다.
+ *  - 최종 관리자가 플랫폼에서 승인하면 여기 명단(mb_이메일)에 올라가고, 승인 메일이 갑니다.
+ */
+const P = PropertiesService.getScriptProperties();
+const TZ = 'Asia/Seoul';
+
+function doPost(e) {
+  try {
+    const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    const a = auth_(req.token);
+    if (!a || a.fail) return out_({ error: 'login', why: a ? a.fail : 'token' });
+    if (req.action === 'whoami') return out_(whoami_(a, req.folderName));
+    const mem = a.owner || isMember_(a.email);
+    if (!mem) return out_({ error: 'login', why: 'member' });
+    const who = { email: a.email, owner: a.owner };
+
+    if (req.action === 'drive') return out_(drive_(who, req));
+    if (req.action === 'upInit') return out_(upInit_(who, req));
+    if (req.action === 'upChunk') return out_(upChunk_(who, req));
+    if (req.action === 'member') {
+      if (!who.owner) return out_({ error: 'owner_only' });
+      return out_(member_(req));
+    }
+    if (req.action === 'admin') {
+      if (!who.owner) return out_({ error: 'owner_only' });
+      const em = String(req.email || '').trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return out_({ error: 'bad_value' });
+      P.setProperty('ADMIN_EMAILS', em); P.setProperty('mb_' + em, '1');
+      return out_({ ok: true });
+    }
+
+    if (req.action === 'usage') {
+      if (!who.owner) return out_({ error: 'owner_only' });
+      return out_({ v: 3, usage: usage_(), cfg: cfg_() });
+    }
+    if (req.action === 'config') {
+      if (!who.owner) return out_({ error: 'owner_only' });
+      const c = req.cfg || {};
+      const d = Math.round(Number(c.daily)), o = Math.round(Number(c.owner));
+      const okModel = function (m) { return /^claude-[a-z0-9.-]{3,60}$/.test(String(m || '')); };
+      if (!(d >= 1 && d <= 1000) || !(o >= 1 && o <= 1000) || !okModel(c.model) || !okModel(c.modelFast)) return out_({ error: 'bad_value' });
+      const admins = (Array.isArray(c.admins) ? c.admins : []).map(function (x) { return String(x).trim().toLowerCase(); })
+        .filter(function (x) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x); }).slice(0, 10);
+      P.setProperties({ DAILY_LIMIT: String(d), OWNER_LIMIT: String(o), ADMIN_EMAILS: admins.join(','), AI_MODEL: c.model, AI_MODEL_FAST: c.modelFast });
+      return out_({ ok: true, cfg: cfg_() });
+    }
+
+    const limit = who.owner ? Number(P.getProperty('OWNER_LIMIT') || 300) : Number(P.getProperty('DAILY_LIMIT') || 30);
+    const n = count_(who.email);
+    if (n > limit) return out_({ error: 'daily_limit', limit: limit });
+
+    const b = req.body || {};
+    if (!Array.isArray(b.messages)) return out_({ error: 'bad_request' });
+    const body = {
+      model: b.tier === 'fast' ? (P.getProperty('AI_MODEL_FAST') || 'claude-haiku-5-5') : (P.getProperty('AI_MODEL') || 'claude-sonnet-5-5'),
+      max_tokens: Math.min(Number(b.max_tokens) || 4000, 8000),
+      messages: b.messages
+    };
+    if (Array.isArray(b.tools)) body.tools = b.tools.slice(0, 12);
+    if (b.system) body.system = String(b.system).slice(0, 20000);
+
+    const r = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { 'x-api-key': P.getProperty('AI_API_KEY'), 'anthropic-version': '2023-06-01' },
+      payload: JSON.stringify(body)
+    });
+    if (r.getResponseCode() !== 200) return out_({ error: 'ai_upstream', code: r.getResponseCode() });
+    const j = JSON.parse(r.getContentText());
+    return out_({ content: j.content, stop_reason: j.stop_reason, left: limit - n });
+  } catch (err) {
+    return out_({ error: 'server', msg: String(err && err.message || err).slice(0, 200) });
+  }
+}
+
+// 로그인 확인 (우리 플랫폼에서 받은 구글 로그인인지)
+function auth_(token) {
+  if (!token) return { fail: 'token' };
+  const cache = CacheService.getScriptCache();
+  const ck = 't_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, token)).slice(0, 40);
+  const hit = cache.get(ck);
+  if (hit) return JSON.parse(hit);
+  const r = UrlFetchApp.fetch('https://oauth2.googleapis.com/tokeninfo?access_token=' + encodeURIComponent(token), { muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200) return { fail: 'token' };
+  const t = JSON.parse(r.getContentText());
+  const cid = String(P.getProperty('CLIENT_ID') || '').trim();
+  if (!cid) return { fail: 'no_client_id' };
+  if (t.aud !== cid && t.azp !== cid) return { fail: 'aud' };
+  const email = String(t.email || '').toLowerCase();
+  if (!email || String(t.email_verified) !== 'true') return { fail: 'email' };
+  const me = Session.getEffectiveUser().getEmail().toLowerCase();
+  const admins = String(P.getProperty('ADMIN_EMAILS') || '').toLowerCase().split(/[\s,]+/).filter(String);
+  const o = { email: email, owner: email === me || admins.indexOf(email) >= 0, deployer: email === me };
+  const ttl = Math.max(30, Math.min(300, Number(t.expires_in || 60) - 30));
+  cache.put(ck, JSON.stringify(o), ttl);                              // 같은 로그인은 몇 분 동안 다시 묻지 않음
+  return o;
+}
+
+// 승인된 사역자인가: 플랫폼에서 승인한 명단(mb_이메일) 또는 예전 방식(자료 폴더 공유)
+function isMember_(email) {
+  if (P.getProperty('mb_' + email) === '1') return true;
+  const cache = CacheService.getScriptCache();
+  const c = cache.get('m_' + email);
+  if (c === '1') return true;
+  if (c === '0') return false;
+  let ok = false;
+  try { const f = DriveApp.getFolderById(root_()); ok = f.getEditors().some(function (u) { return u.getEmail().toLowerCase() === email; }); } catch (e) {}
+  cache.put('m_' + email, ok ? '1' : '0', 300);
+  return ok;
+}
+
+function whoami_(a, folderName) {
+  const mem = a.owner || isMember_(a.email);
+  const me = Session.getEffectiveUser().getEmail().toLowerCase();
+  return { v: 3, email: a.email, deployer: !!a.deployer, admin: !!a.owner, member: mem, holder: me, root: mem ? root_(folderName) : null };
+}
+
+// 자료 폴더 (배포한 사람 드라이브에 있는 FOLDER_NAME 폴더)
+function root_(name) {
+  const saved = P.getProperty('ROOT_ID');
+  if (saved) { try { const f = DriveApp.getFolderById(saved); if (!f.isTrashed()) return saved; } catch (e) {} }
+  const me = Session.getEffectiveUser().getEmail().toLowerCase();
+  const it = DriveApp.getFoldersByName(P.getProperty('FOLDER_NAME') || name || '교회사역 플랫폼 DB');
+  while (it.hasNext()) {
+    const f = it.next();
+    if (!f.isTrashed() && f.getOwner() && f.getOwner().getEmail().toLowerCase() === me) { P.setProperty('ROOT_ID', f.getId()); return f.getId(); }
+  }
+  return null;
+}
+
+/* ---------------- 드라이브 대행 ---------------- */
+const DRIVE_RX = /^https:\/\/www\.googleapis\.com\/(upload\/)?drive\/v3\/files(\/[^?]*)?(\?.*)?$/;
+function tok_() { return ScriptApp.getOAuthToken(); }
+function gget_(url) {
+  const r = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + tok_() }, muteHttpExceptions: true });
+  return r.getResponseCode() === 200 ? JSON.parse(r.getContentText()) : null;
+}
+// 자료 폴더 안의 모든 폴더 ID (10분 기억)
+function folders_(fresh) {
+  const cache = CacheService.getScriptCache();
+  if (!fresh) { const c = cache.get('af'); if (c) return JSON.parse(c); }
+  const root = root_();
+  if (!root) return [];
+  const all = [root];
+  let q = [root];
+  while (q.length) {
+    const batch = q.splice(0, 30);
+    const qq = '(' + batch.map(function (x) { return "'" + x + "' in parents"; }).join(' or ') + ") and mimeType='application/vnd.google-apps.folder' and trashed=false";
+    let pt = '';
+    do {
+      const j = gget_('https://www.googleapis.com/drive/v3/files?pageSize=1000&fields=nextPageToken,files(id)&q=' + encodeURIComponent(qq) + (pt ? '&pageToken=' + pt : ''));
+      if (!j) break;
+      (j.files || []).forEach(function (f) { if (all.indexOf(f.id) < 0) { all.push(f.id); q.push(f.id); } });
+      pt = j.nextPageToken || '';
+    } while (pt);
+  }
+  try { cache.put('af', JSON.stringify(all), 600); } catch (e) {}
+  return all;
+}
+function addFolder_(id) { const L = folders_(); if (L.indexOf(id) < 0) { L.push(id); try { CacheService.getScriptCache().put('af', JSON.stringify(L), 600); } catch (e) {} } }
+function inTree_(parents) {
+  if (!parents || !parents.length) return false;
+  let L = folders_();
+  if (parents.some(function (p) { return L.indexOf(p) >= 0; })) return true;
+  L = folders_(true);                                                  // 방금 만든 폴더일 수 있어 한 번 더
+  return parents.some(function (p) { return L.indexOf(p) >= 0; });
+}
+function fileOk_(id) {
+  const cache = CacheService.getScriptCache();
+  const c = cache.get('p_' + id);
+  if (c) return c === '1';
+  let ok = folders_().indexOf(id) >= 0;
+  if (!ok) { const j = gget_('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(id) + '?fields=parents&supportsAllDrives=true'); ok = !!(j && inTree_(j.parents)); }
+  cache.put('p_' + id, ok ? '1' : '0', 600);
+  return ok;
+}
+function stamp_(meta, who) { meta = meta || {}; meta.appProperties = meta.appProperties || {}; meta.appProperties.by = who.email; return meta; }
+
+function drive_(who, req) {
+  const url = String(req.url || '');
+  const m = DRIVE_RX.exec(url);
+  if (!m) return { error: 'bad_url' };
+  const method = String(req.method || 'GET').toUpperCase();
+  const path = m[2] || '';
+  const sub = path.split('/').filter(String);                            // [id] · [id,'copy'] · [id,'export'] · [id,'permissions',..]
+  const fid = sub[0] ? decodeURIComponent(sub[0]) : null;
+  const limited = !who.owner;
+  if (sub[1] === 'permissions' && limited) return { error: 'forbidden' };
+  if (sub.length > 2 && sub[1] !== 'permissions') return { error: 'bad_url' };
+  let body = req.b64 != null ? Utilities.base64Decode(req.b64) : (req.text != null ? String(req.text) : null);
+  const h = req.headers || {};
+  const ct = String(h['content-type'] || '');
+  let finalUrl = url;
+
+  if (fid && limited && !fileOk_(fid)) return { status: 403, text: '{"error":"forbidden"}', ct: 'application/json' };
+  // 새 파일 · 복사: 넣을 폴더 확인 + 올린 사람 표시
+  const creating = method === 'POST' && (!fid || sub[1] === 'copy');
+  if (creating) {
+    if (/multipart\/related/.test(ct) && body != null) {
+      const bytes = typeof body === 'string' ? Utilities.newBlob(body).getBytes() : body;
+      const bd = (/boundary=([^;]+)/.exec(ct) || [])[1];
+      const txt = Utilities.newBlob(bytes.slice(0, Math.min(bytes.length, 65536))).getDataAsString();
+      const i0 = txt.indexOf('\r\n\r\n'), i1 = txt.indexOf('\r\n--' + bd, i0);
+      if (!bd || i0 < 0 || i1 < 0) return { error: 'bad_request' };
+      const meta = stamp_(JSON.parse(txt.slice(i0 + 4, i1)), who);
+      if (limited && !inTree_(meta.parents)) return { status: 403, text: '{"error":"forbidden"}', ct: 'application/json' };
+      const head = txt.slice(0, i0 + 4) + JSON.stringify(meta);
+      const restIdx = Utilities.newBlob(txt.slice(0, i1)).getBytes().length;  // 원래 메타 끝 (바이트)
+      body = Utilities.newBlob(head).getBytes().concat(bytes.slice(restIdx));
+    } else {
+      const meta = stamp_(body ? JSON.parse(typeof body === 'string' ? body : Utilities.newBlob(body).getDataAsString()) : {}, who);
+      if (limited && !inTree_(meta.parents)) return { status: 403, text: '{"error":"forbidden"}', ct: 'application/json' };
+      body = JSON.stringify(meta);
+    }
+  }
+  // 목록: 결과에서 자료 폴더 밖 파일은 빼기
+  const listing = method === 'GET' && !fid;
+  if (listing && limited) {
+    finalUrl = finalUrl.replace(/([?&]fields=)([^&]*)/, function (all, k, v) {
+      const f = decodeURIComponent(v);
+      return /parents/.test(f) ? all : k + encodeURIComponent(f.replace(/files\(/, 'files(parents,'));
+    });
+  }
+  const cache = CacheService.getScriptCache();
+  const lk = listing ? 'l_' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, finalUrl + '|' + limited)) : null;
+  if (lk) { const c = cache.get(lk); if (c) return JSON.parse(c); }
+
+  const opt = { method: method.toLowerCase(), muteHttpExceptions: true, followRedirects: false, headers: { Authorization: 'Bearer ' + tok_() } };
+  ['range', 'x-upload-content-type', 'x-upload-content-length'].forEach(function (k) { if (h[k]) opt.headers[k] = String(h[k]); });
+  if (body != null && method !== 'GET' && method !== 'DELETE') { opt.payload = body; opt.contentType = ct || 'application/octet-stream'; }
+  const r = UrlFetchApp.fetch(finalUrl, opt);
+  const code = r.getResponseCode();
+  const hs = r.getAllHeaders();
+  const rct = String(hs['Content-Type'] || hs['content-type'] || '');
+  const res = { status: code, ct: rct };
+  const loc = hs['Location'] || hs['location'];
+  if (loc) res.location = loc;
+  if (/json|text|csv|xml/.test(rct)) {
+    let t = r.getContentText();
+    if (listing && limited && code === 200) {
+      const j = JSON.parse(t);
+      const L = folders_();
+      j.files = (j.files || []).filter(function (f) { return (f.parents || []).some(function (p) { return L.indexOf(p) >= 0; }) || L.indexOf(f.id) >= 0; });
+      t = JSON.stringify(j);
+    }
+    if (creating && code === 200) { try { const j = JSON.parse(t); if (j.id && typeof body === 'string' && /vnd\.google-apps\.folder/.test(body)) addFolder_(j.id); } catch (e) {} }
+    res.text = t;
+  } else if (code !== 204) res.b64 = Utilities.base64Encode(r.getBlob().getBytes());
+  if (lk && code === 200 && res.text && res.text.length < 90000) { try { cache.put(lk, JSON.stringify(res), 5); } catch (e) {} }
+  return res;
+}
+
+// 큰 파일 나눠 올리기: 시작
+function upInit_(who, req) {
+  const meta = stamp_(req.meta || {}, who);
+  if (!who.owner && !inTree_(meta.parents)) return { error: 'forbidden' };
+  const size = Number(req.size) || 0, mime = String(req.mime || 'application/octet-stream');
+  const r = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,modifiedTime', {
+    method: 'post', contentType: 'application/json; charset=UTF-8', muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + tok_(), 'X-Upload-Content-Type': mime, 'X-Upload-Content-Length': String(size) },
+    payload: JSON.stringify(meta)
+  });
+  const loc = r.getAllHeaders()['Location'] || r.getAllHeaders()['location'];
+  if (r.getResponseCode() !== 200 || !loc) return { error: 'drive' };
+  const id = Utilities.getUuid();
+  CacheService.getScriptCache().put('up_' + id, JSON.stringify({ loc: loc, email: who.email, size: size }), 21600);
+  return { id: id };
+}
+// 큰 파일 나눠 올리기: 조각 (5MB씩)
+function upChunk_(who, req) {
+  const c = CacheService.getScriptCache().get('up_' + req.id);
+  if (!c) return { error: 'expired' };
+  const s = JSON.parse(c);
+  if (s.email !== who.email) return { error: 'forbidden' };
+  const bytes = Utilities.base64Decode(req.b64 || '');
+  const start = Number(req.start) || 0, end = start + bytes.length - 1;
+  const r = UrlFetchApp.fetch(s.loc, { method: 'put', contentType: 'application/octet-stream', payload: bytes, muteHttpExceptions: true, followRedirects: false,
+    headers: { 'Content-Range': 'bytes ' + start + '-' + end + '/' + s.size } });
+  const code = r.getResponseCode();
+  if (code === 308) { const rg = r.getAllHeaders()['Range'] || r.getAllHeaders()['range']; return { next: rg ? Number(String(rg).split('-')[1]) + 1 : end + 1 }; }
+  if (code === 200 || code === 201) return { done: true, file: JSON.parse(r.getContentText()) };
+  return { error: 'drive', code: code };
+}
+
+// 승인 명단 (플랫폼에서 최종 관리자가 승인 · 해제)
+function member_(req) {
+  const em = String(req.email || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return { error: 'bad_value' };
+  CacheService.getScriptCache().remove('m_' + em);
+  if (req.on) {
+    P.setProperty('mb_' + em, '1');
+    if (req.mail !== false) {
+      try {
+        MailApp.sendEmail({ to: em, subject: '[' + String(req.name || '교회사역 플랫폼').slice(0, 60) + '] 가입이 승인되었습니다',
+          body: '가입이 승인되었습니다.\n\n아래 주소에서 이 구글 계정(' + em + ')으로 로그인하면 바로 쓸 수 있습니다.\n' + String(req.url || '').slice(0, 300) });
+      } catch (e) {}
+    }
+  } else P.deleteProperty('mb_' + em);
+  return { ok: true };
+}
+
+// 하루 사용 횟수 세기
+function count_(email) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const day = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+    const k = 'u_' + day + '_' + email;
+    const n = Number(P.getProperty(k) || 0) + 1;
+    P.setProperty(k, String(n));
+    if (Math.random() < 0.05) {                                        // 지난 날짜 기록 정리
+      const all = P.getProperties();
+      Object.keys(all).forEach(function (x) { if (x.indexOf('u_') === 0 && x.indexOf('u_' + day + '_') !== 0) P.deleteProperty(x); });
+    }
+    return n;
+  } finally { lock.releaseLock(); }
+}
+
+function usage_() {
+  const day = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd');
+  const pre = 'u_' + day + '_';
+  const all = P.getProperties();
+  return Object.keys(all).filter(function (k) { return k.indexOf(pre) === 0; }).map(function (k) { return { email: k.slice(pre.length), n: Number(all[k]) }; });
+}
+
+// 최종 관리자에게 보여 줄 설정 (AI 키 값은 절대 보내지 않음)
+function cfg_() {
+  return {
+    daily: Number(P.getProperty('DAILY_LIMIT') || 30),
+    owner: Number(P.getProperty('OWNER_LIMIT') || 300),
+    admins: String(P.getProperty('ADMIN_EMAILS') || '').split(/[\s,]+/).filter(String),
+    model: P.getProperty('AI_MODEL') || 'claude-sonnet-5-5',
+    modelFast: P.getProperty('AI_MODEL_FAST') || 'claude-haiku-5-5',
+    keySet: !!P.getProperty('AI_API_KEY')
+  };
+}
+
+function out_(o) {
+  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+}
+
+// 처음 한 번 실행해서 권한을 허락하는 용도 (편집기에서 이 함수를 골라 ▶ 실행)
+function setupPermissions() {
+  DriveApp.getRootFolder();
+  MailApp.getRemainingDailyQuota();
+  UrlFetchApp.fetch('https://www.google.com', { muteHttpExceptions: true });
+  Logger.log('준비 완료: ' + Session.getEffectiveUser().getEmail());
+}
